@@ -8,7 +8,7 @@ import os
 import datetime
 
 # Página ancha y título
-st.set_page_config(layout="wide", page_title="Reportes de Mantención")
+st.set_page_config(layout="wide", page_title="Dashboard")
 
 # Global CSS for a more professional look
 _GLOBAL_CSS = """
@@ -275,7 +275,8 @@ def filter_by_date_and_turn(df: pd.DataFrame, date, turno):
     if fecha_col is None:
         return pd.DataFrame()
     df2 = df.copy()
-    df2["__fecha_parsed"] = pd.to_datetime(df2[fecha_col], errors="coerce")
+    # Force dayfirst=True here as well
+    df2["__fecha_parsed"] = pd.to_datetime(df2[fecha_col], errors="coerce", dayfirst=True)
     df2["__fecha_date"] = df2["__fecha_parsed"].dt.date
     if turno_col is not None:
         df2["__turno_str"] = df2[turno_col].astype(str)
@@ -288,7 +289,7 @@ def filter_by_date_and_turn(df: pd.DataFrame, date, turno):
 
 
 def main():
-    st.title("Reportes de Mantención")
+    # st.title("Reportes de Mantención") # Removed for privacy
     workspace = Path(__file__).parent
     xls = workspace / "BBDD_MANTENCION.xlsm"
     
@@ -319,7 +320,8 @@ def main():
         if fecha_col_k == "" or equipo_col_k == "":
             st.warning("tbl_bitacora no tiene columnas Fecha o Equipo reconocibles. Seleccione otra hoja.")
         else:
-            df_k["__fecha_parsed"] = pd.to_datetime(df_k[fecha_col_k], errors="coerce")
+            # Force dayfirst=True to handle DD/MM/YYYY correctly
+            df_k["__fecha_parsed"] = pd.to_datetime(df_k[fecha_col_k], errors="coerce", dayfirst=True)
             df_k["__fecha_date"] = df_k["__fecha_parsed"].dt.date
 
             valid_dates = df_k["__fecha_date"].dropna()
@@ -405,7 +407,8 @@ def main():
             st.error("La hoja `tbl_bitacora` no contiene una columna de fecha reconocible.")
         else:
             df_local = df.copy()
-            df_local["__fecha_parsed"] = pd.to_datetime(df_local[fecha_col], errors="coerce")
+            # Force dayfirst=True to handle DD/MM/YYYY correctly
+            df_local["__fecha_parsed"] = pd.to_datetime(df_local[fecha_col], errors="coerce", dayfirst=True)
             df_local["__fecha_date"] = df_local["__fecha_parsed"].dt.date
             
             valid_dates = df_local["__fecha_date"].dropna()
@@ -530,7 +533,8 @@ def main():
             if fecha_col_b == "" or equipo_col_b == "":
                 st.error("tbl_bitacora no contiene 'Fecha' o 'Equipo' reconocibles.")
             else:
-                df_bit["__fecha_parsed"] = pd.to_datetime(df_bit[fecha_col_b], errors="coerce")
+                # Force dayfirst=True
+                df_bit["__fecha_parsed"] = pd.to_datetime(df_bit[fecha_col_b], errors="coerce", dayfirst=True)
                 df_bit["__fecha_date"] = df_bit["__fecha_parsed"].dt.date
                 
                 valid_dates = df_bit["__fecha_date"].dropna()
