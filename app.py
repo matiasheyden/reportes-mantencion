@@ -82,12 +82,12 @@ def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
             creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
             client = gspread.authorize(creds)
             
-            # Open the Google Sheet
-            sheet_name = "BBDD_MANTENCION" 
+            # Open the Google Sheet by Key (more reliable)
+            sheet_key = "1Xxl5G53qe8zjRy2XAkscrCBKp6_OTMHTlcKdCJshWYU"
             try:
-                sh = client.open(sheet_name)
+                sh = client.open_by_key(sheet_key)
             except gspread.SpreadsheetNotFound:
-                st.error(f"No se encontró el Google Sheet llamado '{sheet_name}'. Asegúrate de compartirlo con el email del robot.")
+                st.error(f"No se encontró el Google Sheet con ID '{sheet_key}'. Asegúrate de compartirlo con el email del robot.")
                 return {}
 
             # Read the specific worksheet
@@ -279,18 +279,15 @@ def main():
     st.title("Reportes de Mantención")
     workspace = Path(__file__).parent
     xls = workspace / "BBDD_MANTENCION.xlsm"
-    csv_cache = workspace / "tbl_bitacora.csv"
-
-    # Check if either source exists
-    if not xls.exists() and not csv_cache.exists():
-        st.error(f"No se encontraron datos. Falta {xls.name} o {csv_cache.name}")
-        return
-
+    
+    # Load data (Google Sheets -> CSV -> Excel)
     sheets = load_sheets(xls)
-    # Trabajar exclusivamente con tbl_bitacora
-    if "tbl_bitacora" not in sheets:
-        st.error("No se encontró la hoja `tbl_bitacora` en el archivo. Asegúrese de que exista y vuelva a cargar.")
+    
+    # Check if we got any data
+    if not sheets or "tbl_bitacora" not in sheets:
+        st.error("No se encontraron datos. Asegúrese de que la conexión a Google Sheets esté configurada o que exista 'tbl_bitacora.csv' localmente.")
         return
+
     df = sheets["tbl_bitacora"].copy()
 
     # Use explicit radio selector for sections to keep selection stable across reruns
