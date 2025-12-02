@@ -71,28 +71,44 @@ def find_column(df: pd.DataFrame, keywords: List[str]) -> Optional[str]:
 @st.cache_data
 def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
     # Performance: avoid loading the whole workbook (xlsm) which can be large and slow
-    # Fast path: use a cached CSV if present and newer than the Excel file
+    # Fast path: use a cached CSV if present.
+    # In cloud deployment, xls_path might not exist, so we rely on CSV.
     csv_cache = xls_path.parent / "tbl_bitacora.csv"
-    try:
-        if csv_cache.exists() and csv_cache.stat().st_mtime >= xls_path.stat().st_mtime:
-            df = pd.read_csv(csv_cache, parse_dates=True, encoding="utf-8-sig")
-            return {"tbl_bitacora": df}
-    except Exception:
-        # If cache check/reading fails, continue to try reading Excel
-        pass
+    
+    # 1. Try loading CSV first
+    if csv_cache.exists():
+        # If Excel exists, check timestamps to ensure CSV is fresh
+        if xls_path.exists():
+            if csv_cache.stat().st_mtime >= xls_path.stat().st_mtime:
+                try:
+                    df = pd.read_csv(csv_cache, parse_dates=True, encoding="utf-8-sig")
+                    return {"tbl_bitacora": df}
+                except Exception:
+                    pass
+        else:
+            # Excel missing (Cloud scenario), just use CSV
+            try:
+                df = pd.read_csv(csv_cache, parse_dates=True, encoding="utf-8-sig")
+                return {"tbl_bitacora": df}
+            except Exception:
+                pass
 
-    try:
-        # Try reading only the sheet we actually use (much faster than sheet_name=None)
-        df = pd.read_excel(xls_path, sheet_name="tbl_bitacora", engine="openpyxl")
-        # Save a CSV cache to speed up subsequent loads (best-effort)
+    # 2. If CSV failed or is old, try reading Excel (if it exists)
+    if xls_path.exists():
         try:
-            df.to_csv(csv_cache, index=False, encoding="utf-8-sig")
+            # Try reading only the sheet we actually use (much faster than sheet_name=None)
+            df = pd.read_excel(xls_path, sheet_name="tbl_bitacora", engine="openpyxl")
+            # Save a CSV cache to speed up subsequent loads (best-effort)
+            try:
+                df.to_csv(csv_cache, index=False, encoding="utf-8-sig")
+            except Exception:
+                pass
+            return {"tbl_bitacora": df}
         except Exception:
-            pass
-        return {"tbl_bitacora": df}
-    except Exception:
-        # Last-resort: fall back to reading all sheets (original behaviour)
-        return pd.read_excel(xls_path, sheet_name=None, engine="openpyxl")
+            # Last-resort: fall back to reading all sheets (original behaviour)
+            return pd.read_excel(xls_path, sheet_name=None, engine="openpyxl")
+    
+    return {}
 
 
 def compute_downtime_minutes(row: pd.Series, det_min_col: Optional[str], inicio_col: Optional[str], fin_col: Optional[str]) -> float:
@@ -225,8 +241,11 @@ def main():
     st.title("Reportes de Mantención")
     workspace = Path(__file__).parent
     xls = workspace / "BBDD_MANTENCION.xlsm"
-    if not xls.exists():
-        st.error(f"No se encontró el archivo de datos: {xls}")
+    csv_cache = workspace / "tbl_bitacora.csv"
+
+    # Check if either source exists
+    if not xls.exists() and not csv_cache.exists():
+        st.error(f"No se encontraron datos. Falta {xls.name} o {csv_cache.name}")
         return
 
     sheets = load_sheets(xls)
