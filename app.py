@@ -71,13 +71,19 @@ def find_column(df: pd.DataFrame, keywords: List[str]) -> Optional[str]:
 @st.cache_data(ttl=600)
 def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
     # 0. Try loading from Google Sheets (Cloud / Secrets)
+    # Check if secrets are nested under [gcp_service_account] or at root
+    creds_dict = None
     if "gcp_service_account" in st.secrets:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+    elif "type" in st.secrets and st.secrets["type"] == "service_account":
+        # Fallback: User pasted JSON content directly without header
+        creds_dict = dict(st.secrets)
+
+    if creds_dict:
         try:
             import gspread
             from google.oauth2.service_account import Credentials
             
-            # Load credentials from secrets
-            creds_dict = dict(st.secrets["gcp_service_account"])
             scopes = ["https://www.googleapis.com/auth/spreadsheets"]
             creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
             client = gspread.authorize(creds)
@@ -87,7 +93,7 @@ def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
             try:
                 sh = client.open_by_key(sheet_key)
             except gspread.SpreadsheetNotFound:
-                st.error(f"No se encontró el Google Sheet con ID '{sheet_key}'. Asegúrate de compartirlo con el email del robot.")
+                st.error(f"No se encontró el Google Sheet con ID '{sheet_key}'. Asegúrate de compartirlo con el email del robot: {creds_dict.get('client_email', 'unknown')}")
                 return {}
 
             # Read the specific worksheet
@@ -107,6 +113,9 @@ def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
             st.error(f"Error conectando a Google Sheets: {e}")
             # Fallthrough to local files if GSheets fails
             pass
+    else:
+        if not xls_path.exists():
+            st.warning("No se detectaron credenciales de Google Sheets en st.secrets. Verifica la configuración en 'Advanced Settings'.")
 
     # Performance: avoid loading the whole workbook (xlsm) which can be large and slow
     # Fast path: use a cached CSV if present.
