@@ -1,0 +1,17 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Logs and temporary
+*.log
+streamlit_run.log*
+
+# PDFs and test artifacts (optional)
+*.pdf
+
+# CSV exports (optional) - uncomment if you want to keep them in repo
+# csv_exports/
+*.xlsm

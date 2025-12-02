@@ -1,0 +1,7 @@
+streamlit
+pandas
+openpyxl
+plotly
+reportlab
+dataframe_image
+streamlit-aggrid

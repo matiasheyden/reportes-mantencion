@@ -1,0 +1,14 @@
+[Unit]
+Description=Streamlit Reportes de Mantencion
+After=network.target
+
+[Service]
+User=ubuntu
+Group=www-data
+WorkingDirectory=/home/ubuntu/streamlit_reportes
+Environment="PATH=/home/ubuntu/streamlit_reportes/.venv/bin"
+ExecStart=/home/ubuntu/streamlit_reportes/.venv/bin/python -m streamlit run /home/ubuntu/streamlit_reportes/app.py --server.headless true --server.port 8501 --server.address 127.0.0.1
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
