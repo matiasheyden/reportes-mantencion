@@ -68,8 +68,46 @@ def find_column(df: pd.DataFrame, keywords: List[str]) -> Optional[str]:
     return None
 
 
-@st.cache_data
+@st.cache_data(ttl=600)
 def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
+    # 0. Try loading from Google Sheets (Cloud / Secrets)
+    if "gcp_service_account" in st.secrets:
+        try:
+            import gspread
+            from google.oauth2.service_account import Credentials
+            
+            # Load credentials from secrets
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            client = gspread.authorize(creds)
+            
+            # Open the Google Sheet
+            sheet_name = "BBDD_MANTENCION" 
+            try:
+                sh = client.open(sheet_name)
+            except gspread.SpreadsheetNotFound:
+                st.error(f"No se encontró el Google Sheet llamado '{sheet_name}'. Asegúrate de compartirlo con el email del robot.")
+                return {}
+
+            # Read the specific worksheet
+            worksheet_name = "tbl_bitacora"
+            try:
+                ws = sh.worksheet(worksheet_name)
+            except gspread.WorksheetNotFound:
+                ws = sh.get_worksheet(0)
+                st.warning(f"No se encontró la hoja '{worksheet_name}', usando la primera hoja: '{ws.title}'")
+
+            # Convert to DataFrame
+            data = ws.get_all_records()
+            df = pd.DataFrame(data)
+            return {"tbl_bitacora": df}
+
+        except Exception as e:
+            st.error(f"Error conectando a Google Sheets: {e}")
+            # Fallthrough to local files if GSheets fails
+            pass
+
     # Performance: avoid loading the whole workbook (xlsm) which can be large and slow
     # Fast path: use a cached CSV if present.
     # In cloud deployment, xls_path might not exist, so we rely on CSV.

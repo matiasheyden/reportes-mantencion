@@ -5,3 +5,5 @@ plotly
 reportlab
 dataframe_image
 streamlit-aggrid
+gspread 
+google-oauth2
