@@ -289,7 +289,7 @@ def filter_by_date_and_turn(df: pd.DataFrame, date, turno):
 
 
 def main():
-    # st.title("Reportes de Mantención") # Removed for privacy
+    st.title("Reportes de Mantención")
     workspace = Path(__file__).parent
     xls = workspace / "BBDD_MANTENCION.xlsm"
     
