@@ -116,6 +116,8 @@ def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
     else:
         if not xls_path.exists():
             st.warning("No se detectaron credenciales de Google Sheets en st.secrets. Verifica la configuración en 'Advanced Settings'.")
+            # Debug: Show what keys are actually present to help the user fix it
+            st.info(f"Depuración: Las claves encontradas en 'Secrets' son: {list(st.secrets.keys())}")
 
     # Performance: avoid loading the whole workbook (xlsm) which can be large and slow
     # Fast path: use a cached CSV if present.
