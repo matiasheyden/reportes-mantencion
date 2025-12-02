@@ -5,6 +5,7 @@ from typing import Dict, Optional, List
 import math
 import io
 import os
+import datetime
 
 # Página ancha y título
 st.set_page_config(layout="wide", page_title="Reportes de Mantención")
@@ -116,16 +117,8 @@ def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
     else:
         if not xls_path.exists():
             st.warning("No se detectaron credenciales de Google Sheets en st.secrets. Verifica la configuración en 'Advanced Settings'.")
+            # Debug: Show what keys are actually present to help the user fix it
             st.info(f"Depuración: Las claves encontradas en 'Secrets' son: {list(st.secrets.keys())}")
-            st.markdown("""
-            **Ayuda para configurar Secrets:**
-            Asegúrate de que tu configuración en Streamlit Cloud se vea así:
-            ```toml
-            [gcp_service_account]
-            type = "service_account"
-            ...
-            ```
-            """)
 
     # Performance: avoid loading the whole workbook (xlsm) which can be large and slow
     # Fast path: use a cached CSV if present.
@@ -329,8 +322,17 @@ def main():
             df_k["__fecha_parsed"] = pd.to_datetime(df_k[fecha_col_k], errors="coerce")
             df_k["__fecha_date"] = df_k["__fecha_parsed"].dt.date
 
-            start = st.date_input("Fecha inicio", value=df_k["__fecha_date"].min(), key="kpi_start")
-            end = st.date_input("Fecha fin", value=df_k["__fecha_date"].max(), key="kpi_end")
+            valid_dates = df_k["__fecha_date"].dropna()
+            if valid_dates.empty:
+                st.warning("No se encontraron fechas válidas en la columna de fecha.")
+                default_start = datetime.date.today()
+                default_end = datetime.date.today()
+            else:
+                default_start = valid_dates.min()
+                default_end = valid_dates.max()
+
+            start = st.date_input("Fecha inicio", value=default_start, key="kpi_start")
+            end = st.date_input("Fecha fin", value=default_end, key="kpi_end")
 
             mask = (df_k["__fecha_date"] >= start) & (df_k["__fecha_date"] <= end)
             period = df_k[mask].copy()
@@ -405,7 +407,13 @@ def main():
             df_local = df.copy()
             df_local["__fecha_parsed"] = pd.to_datetime(df_local[fecha_col], errors="coerce")
             df_local["__fecha_date"] = df_local["__fecha_parsed"].dt.date
-            max_date = df_local["__fecha_date"].max()
+            
+            valid_dates = df_local["__fecha_date"].dropna()
+            if valid_dates.empty:
+                max_date = datetime.date.today()
+            else:
+                max_date = valid_dates.max()
+
             # automatic update when choosing a date/turno (use unique keys to avoid widget id collision)
             date_selected = st.date_input("Fecha", value=max_date, key="bit_fecha")
             turno_col = find_column(df_local, ["turno", "shift"]) or None
@@ -524,8 +532,17 @@ def main():
             else:
                 df_bit["__fecha_parsed"] = pd.to_datetime(df_bit[fecha_col_b], errors="coerce")
                 df_bit["__fecha_date"] = df_bit["__fecha_parsed"].dt.date
-                s = st.date_input("Fecha inicio", value=df_bit["__fecha_date"].min(), key="disp_start")
-                e = st.date_input("Fecha fin", value=df_bit["__fecha_date"].max(), key="disp_end")
+                
+                valid_dates = df_bit["__fecha_date"].dropna()
+                if valid_dates.empty:
+                    default_s = datetime.date.today()
+                    default_e = datetime.date.today()
+                else:
+                    default_s = valid_dates.min()
+                    default_e = valid_dates.max()
+
+                s = st.date_input("Fecha inicio", value=default_s, key="disp_start")
+                e = st.date_input("Fecha fin", value=default_e, key="disp_end")
                 mask = (df_bit["__fecha_date"] >= s) & (df_bit["__fecha_date"] <= e)
                 period = df_bit[mask].copy()
                 if period.empty:
