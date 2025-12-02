@@ -3,7 +3,7 @@ pandas
 openpyxl
 plotly
 reportlab
-dataframe_image
+dataframe-image
 streamlit-aggrid
-gspread 
-google-oauth2
+gspread
+google-auth
