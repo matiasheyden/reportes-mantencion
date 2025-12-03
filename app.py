@@ -353,7 +353,8 @@ def filter_by_date_and_turn(df: pd.DataFrame, date, turno):
 
 
 def main():
-    st.title("Reportes de Mantención")
+    st.title("Reportes de Mantención - PRUEBA COPILOT 🚀")
+    st.error("⚠️ SI VES ESTO, LA CONEXIÓN ES EXITOSA ⚠️")
     workspace = Path(__file__).parent
     xls = workspace / "BBDD_MANTENCION.xlsm"
     
