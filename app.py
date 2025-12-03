@@ -117,7 +117,7 @@ def load_sheets(xls_path: Path) -> tuple[Dict[str, pd.DataFrame], str]:
                 return {}, "Error GSheets"
 
             # Read specific worksheets
-            sheets_to_load = ["tbl_bitacora", "OM", "Presupuesto", "Otros_Gastos", "tbl_programacion"]
+            sheets_to_load = ["tbl_bitacora", "OM", "Presupuesto", "Otros_Gastos", "tbl_programacion", "maestra_activos"]
             loaded_data = {}
             
             for sheet_name in sheets_to_load:
@@ -620,6 +620,37 @@ def main():
         inicio_col = find_column(df_rel, ["inicio", "start"])
         fin_col = find_column(df_rel, ["fin", "end"])
         type_col = find_column(df_rel, ["tipo", "type", "clasificacion", "category", "clase"])
+        
+        # --- MERGE WITH MASTER SHEET (maestra_activos) ---
+        # If 'maestra_activos' exists, we merge it to get 'Tipo' automatically
+        if "maestra_activos" in sheets and not sheets["maestra_activos"].empty and equipo_col:
+            df_master = sheets["maestra_activos"].copy()
+            # Find key columns in master
+            m_name_col = find_column(df_master, ["nombre", "equipo", "activo", "item"])
+            m_type_col = find_column(df_master, ["tipo", "clase", "categoria"])
+            
+            if m_name_col and m_type_col:
+                # Clean and prepare merge
+                # We use a left join on the equipment name
+                # Normalize names for better matching (strip whitespace)
+                df_rel["_key_merge"] = df_rel[equipo_col].astype(str).str.strip()
+                df_master["_key_merge"] = df_master[m_name_col].astype(str).str.strip()
+                
+                # Merge
+                df_merged = pd.merge(df_rel, df_master[[m_name_col, m_type_col, "_key_merge"]], on="_key_merge", how="left", suffixes=("", "_master"))
+                
+                # If the original df didn't have a type column, use the master one
+                if not type_col:
+                    type_col = m_type_col + "_master" # The merge might rename it if collision, but usually it's unique
+                    # Actually, let's just rename the new column to something standard
+                    df_merged.rename(columns={m_type_col: "Tipo_Activo_Master"}, inplace=True)
+                    type_col = "Tipo_Activo_Master"
+                    df_rel = df_merged
+                else:
+                    # If it existed, we can prioritize the master or keep original. Let's prioritize Master.
+                    df_merged[type_col] = df_merged[m_type_col].fillna(df_merged[type_col])
+                    df_rel = df_merged
+        # -------------------------------------------------
         
         if not (fecha_col and equipo_col):
             st.error("Faltan columnas clave (Fecha, Equipo) en la bitácora para realizar el análisis.")
