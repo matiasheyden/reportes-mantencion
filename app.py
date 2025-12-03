@@ -682,7 +682,13 @@ def main():
                 if not df_om.empty and om_date_col:
                     # Ensure we have the year filtered data available or re-filter
                     # We can reuse df_om (which has _year and _month cols added previously)
-                    om_month = df_om[(df_om["_year"] == selected_year) & (df_om["_month"] == detail_month_num)]
+                    om_month = df_om[(df_om["_year"] == selected_year) & (df_om["_month"] == detail_month_num)].copy()
+                    
+                    # Clean currency columns for comparison
+                    if om_rep_col:
+                        om_month[om_rep_col] = om_month[om_rep_col].apply(clean_currency)
+                    if om_serv_col:
+                        om_month[om_serv_col] = om_month[om_serv_col].apply(clean_currency)
                     
                     # We need Description column
                     om_desc_col = find_column(om_month, ["descripción", "descripcion", "desc. orden", "desc"])
@@ -714,20 +720,27 @@ def main():
                             
                 # 2. From Otros Gastos
                 if not df_otros.empty and og_date_col:
-                    og_month = df_otros[(df_otros["_year"] == selected_year) & (df_otros["_month"] == detail_month_num)]
+                    og_month = df_otros[(df_otros["_year"] == selected_year) & (df_otros["_month"] == detail_month_num)].copy()
+                    
+                    # Clean currency
+                    if og_amount_col:
+                        og_month[og_amount_col] = og_month[og_amount_col].apply(clean_currency)
+                        
                     og_desc_col = find_column(og_month, ["descripcion", "descripción", "detalle"])
                     
                     for _, row in og_month.iterrows():
                         desc = row[og_desc_col] if og_desc_col else "Sin descripción"
                         cat = row[og_cat_col] if og_cat_col else "Otros Gastos"
                         
-                        details.append({
-                            "Fecha": row["_date"].strftime("%d/%m/%Y"),
-                            "Origen": "Otros Gastos",
-                            "Descripción": desc,
-                            "Categoría": cat,
-                            "Monto": row[og_amount_col]
-                        })
+                        # Only add if amount > 0
+                        if og_amount_col and row[og_amount_col] > 0:
+                            details.append({
+                                "Fecha": row["_date"].strftime("%d/%m/%Y"),
+                                "Origen": "Otros Gastos",
+                                "Descripción": desc,
+                                "Categoría": cat,
+                                "Monto": row[og_amount_col]
+                            })
                 
                 if not details:
                     st.info(f"No hay gastos detallados para {month_options[detail_month_num]}.")
