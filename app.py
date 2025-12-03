@@ -547,57 +547,51 @@ def main():
             else:
                 # --- VISUALIZATION ---
                 
-                # 1. Monthly Selection for Waterfall
-                # Get list of months present in data
-                months_present = sorted(df_actuals["Month"].unique())
+                # 1. Annual Waterfall (Budget vs Months)
                 month_names = {1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio", 
                                7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"}
                 
-                month_options = {m: month_names.get(m, str(m)) for m in months_present}
+                # Calculate Annual Budget
+                total_annual_budget = budget_df[pre_amount_col].sum()
                 
-                # Default to latest month
-                selected_month_num = st.selectbox("Seleccionar Mes para Detalle", options=months_present, format_func=lambda x: month_options[x], index=len(months_present)-1)
-                
-                # Get Budget for this month
-                monthly_budget_row = budget_df[budget_df["_month_num"] == selected_month_num]
-                monthly_budget = monthly_budget_row[pre_amount_col].sum() if not monthly_budget_row.empty else 0
-                
-                # Get Actuals for this month
-                monthly_actuals = df_actuals[df_actuals["Month"] == selected_month_num].copy()
+                # Calculate Monthly Expenses
+                monthly_expenses = df_actuals.groupby("Month")["Amount"].sum().reset_index()
+                monthly_expenses["MonthName"] = monthly_expenses["Month"].map(month_names)
+                monthly_expenses = monthly_expenses.sort_values("Month")
                 
                 # --- WATERFALL CHART ---
-                st.markdown(f"### Flujo de Caja - {month_options[selected_month_num]} {selected_year}")
+                st.markdown(f"### Flujo de Caja Anual - {selected_year}")
                 
                 # Prepare data for Waterfall
-                # Start: Budget
-                # Decrements: Categories
-                # End: Remaining
+                # Start: Annual Budget
+                # Decrements: Months
+                # End: Available
                 
                 measure = ["absolute"]  # For Budget
                 x_data = ["Presupuesto"]
-                y_data = [monthly_budget]
-                text_data = [f"${monthly_budget:,.0f}"]
+                y_data = [total_annual_budget]
+                text_data = [f"${total_annual_budget:,.0f}"]
                 
                 total_spent = 0
                 
-                for _, row in monthly_actuals.iterrows():
-                    cat = row["Category"]
+                # Add months
+                for _, row in monthly_expenses.iterrows():
+                    m_name = row["MonthName"]
                     amt = row["Amount"]
                     measure.append("relative")
-                    x_data.append(cat)
+                    x_data.append(m_name)
                     y_data.append(-amt) # Negative because it's a cost
                     text_data.append(f"-${amt:,.0f}")
                     total_spent += amt
                 
                 # Final: Available
-                available = monthly_budget - total_spent
+                available = total_annual_budget - total_spent
                 measure.append("total")
                 x_data.append("Disponible")
-                y_data.append(None) # Calculated automatically by 'total' but we can force it if needed, usually 'total' computes sum of previous
-                # Actually for 'total' in plotly waterfall, it sums all previous. 
-                # Since we put budget as positive and costs as negative, the sum is exactly the remaining.
+                y_data.append(None)
                 text_data.append(f"${available:,.0f}")
                 
+                # Create Figure with White Background style to match reference
                 fig = go.Figure(go.Waterfall(
                     name = "20", orientation = "v",
                     measure = measure,
@@ -605,24 +599,24 @@ def main():
                     textposition = "outside",
                     text = text_data,
                     y = y_data,
-                    connector = {"line":{"color":"rgba(255, 255, 255, 0.5)", "width": 2}},
-                    decreasing = {"marker":{"color":"#ef4444", "line":{"color":"white", "width":1}}}, # Red for costs
-                    increasing = {"marker":{"color":"#22c55e", "line":{"color":"white", "width":1}}}, # Green for budget
-                    totals = {"marker":{"color":"#3b82f6", "line":{"color":"white", "width":1}}},       # Blue for result
-                    textfont = {"size": 16, "color": "white", "family": "Arial Black"}
+                    connector = {"line":{"color":"#333333", "width": 1}},
+                    decreasing = {"marker":{"color":"#c00000"}}, # Dark Red for costs
+                    increasing = {"marker":{"color":"#0f52ba"}}, # Dark Blue for budget
+                    totals = {"marker":{"color":"#0f52ba"}},     # Dark Blue for result
+                    textfont = {"size": 14, "color": "black", "family": "Arial"}
                 ))
                 
                 fig.update_layout(
-                    title = dict(text=f"Presupuesto vs Gastos ({month_options[selected_month_num]})", font=dict(size=24)),
+                    title = dict(text=f"Presupuesto vs Gastos ({selected_year})", font=dict(size=20, color="black")),
                     showlegend = False,
-                    plot_bgcolor = "rgba(0,0,0,0)",
-                    paper_bgcolor = "rgba(0,0,0,0)",
-                    font = dict(color="white", size=16),
-                    xaxis = dict(tickfont=dict(size=14, color="white")),
-                    yaxis = dict(tickfont=dict(size=14, color="white"), title="Monto ($)"),
+                    plot_bgcolor = "white",
+                    paper_bgcolor = "white",
+                    font = dict(color="black", size=12),
+                    xaxis = dict(tickfont=dict(size=12, color="black"), showgrid=False),
+                    yaxis = dict(tickfont=dict(size=12, color="black"), title="Monto ($)", showgrid=True, gridcolor="#e5e5e5"),
                     autosize=True,
-                    height=600,
-                    bargap=0.15 # Make bars wider
+                    height=500,
+                    bargap=0.2
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
