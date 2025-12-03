@@ -387,9 +387,45 @@ def main():
         if fecha_col_k == "" or equipo_col_k == "":
             st.warning("tbl_bitacora no tiene columnas Fecha o Equipo reconocibles. Seleccione otra hoja.")
         else:
+            # --- MASTER DATA FILTERS (KPI) ---
+            allowed_equips = None
+            if "maestra_activos" in sheets and not sheets["maestra_activos"].empty:
+                df_master = sheets["maestra_activos"].copy()
+                m_name_col = find_column(df_master, ["nombre", "equipo", "activo", "item"])
+                m_sys_col = find_column(df_master, ["sistema", "system"])
+                m_space_col = find_column(df_master, ["espacio", "edificio", "ubicacion", "area", "sector"])
+                
+                if m_name_col:
+                    # Filters UI
+                    filters_active = False
+                    
+                    if m_space_col:
+                        all_spaces = sorted(list(df_master[m_space_col].dropna().unique()))
+                        sel_spaces = st.multiselect("Filtrar por Espacio/Edificio", all_spaces, key="kpi_space_filter")
+                        if sel_spaces:
+                            df_master = df_master[df_master[m_space_col].isin(sel_spaces)]
+                            filters_active = True
+                    
+                    if m_sys_col:
+                        all_systems = sorted(list(df_master[m_sys_col].dropna().unique()))
+                        sel_systems = st.multiselect("Filtrar por Sistema", all_systems, key="kpi_sys_filter")
+                        if sel_systems:
+                            df_master = df_master[df_master[m_sys_col].isin(sel_systems)]
+                            filters_active = True
+                    
+                    if filters_active:
+                        allowed_equips = set(df_master[m_name_col].astype(str).str.strip().unique())
+
             # Parse dates Bitacora
             df_k["__fecha_parsed"] = pd.to_datetime(df_k[fecha_col_k], errors="coerce", dayfirst=True)
             df_k["__fecha_date"] = df_k["__fecha_parsed"].dt.date
+            
+            # Apply Master Filter to Bitacora
+            if allowed_equips is not None:
+                # Normalize and filter
+                df_k["_temp_eq"] = df_k[equipo_col_k].astype(str).str.strip()
+                df_k = df_k[df_k["_temp_eq"].isin(allowed_equips)].copy()
+
             
             # Date Range Selector
             valid_dates = df_k["__fecha_date"].dropna()
@@ -456,6 +492,12 @@ def main():
                             return float(x)
                         except: return 0.0
                     df_prog_clean["__mins"] = df_prog_clean[prog_hrs_col].apply(clean_hours) * 60
+                    
+                    # Apply Master Filter to Programacion
+                    if allowed_equips is not None:
+                        df_prog_clean["_temp_eq"] = df_prog_clean["__eq"].astype(str).str.strip()
+                        df_prog_clean = df_prog_clean[df_prog_clean["_temp_eq"].isin(allowed_equips)].copy()
+                    
                     eq_list_prog = df_prog_clean["__eq"].unique()
 
             all_equips = sorted(list(set(list(eq_list_bit) + list(eq_list_prog))))
@@ -631,48 +673,73 @@ def main():
         type_col = find_column(df_rel, ["tipo", "type", "clasificacion", "category", "clase"])
         
         # --- MERGE WITH MASTER SHEET (maestra_activos) ---
-        # If 'maestra_activos' exists, we merge it to get 'Tipo' automatically
+        system_col = None
+        space_col = None
+        
         if "maestra_activos" in sheets and not sheets["maestra_activos"].empty and equipo_col:
             df_master = sheets["maestra_activos"].copy()
-            # Find key columns in master
             m_name_col = find_column(df_master, ["nombre", "equipo", "activo", "item"])
             m_type_col = find_column(df_master, ["tipo", "clase", "categoria"])
+            m_sys_col = find_column(df_master, ["sistema", "system"])
+            m_space_col = find_column(df_master, ["espacio", "edificio", "ubicacion", "area", "sector"])
             
-            if m_name_col and m_type_col:
-                # Clean and prepare merge
-                # We use a left join on the equipment name
-                # Normalize names for better matching (strip whitespace)
+            if m_name_col:
                 df_rel["_key_merge"] = df_rel[equipo_col].astype(str).str.strip()
                 df_master["_key_merge"] = df_master[m_name_col].astype(str).str.strip()
                 
-                # Merge
-                df_merged = pd.merge(df_rel, df_master[[m_name_col, m_type_col, "_key_merge"]], on="_key_merge", how="left", suffixes=("", "_master"))
+                cols_to_merge = [m_name_col, "_key_merge"]
+                if m_type_col: cols_to_merge.append(m_type_col)
+                if m_sys_col: cols_to_merge.append(m_sys_col)
+                if m_space_col: cols_to_merge.append(m_space_col)
                 
-                # If the original df didn't have a type column, use the master one
-                if not type_col:
-                    type_col = m_type_col + "_master" # The merge might rename it if collision, but usually it's unique
-                    # Actually, let's just rename the new column to something standard
-                    df_merged.rename(columns={m_type_col: "Tipo_Activo_Master"}, inplace=True)
-                    type_col = "Tipo_Activo_Master"
-                    df_rel = df_merged
-                else:
-                    # If it existed, we can prioritize the master or keep original. Let's prioritize Master.
-                    df_merged[type_col] = df_merged[m_type_col].fillna(df_merged[type_col])
-                    df_rel = df_merged
-        # -------------------------------------------------
+                df_merged = pd.merge(df_rel, df_master[cols_to_merge], on="_key_merge", how="left", suffixes=("", "_master"))
+                
+                if m_type_col:
+                    if not type_col:
+                        # If collision, rename master column to avoid confusion or overwrite
+                        target_col = m_type_col + "_master" if m_type_col in df_rel.columns else m_type_col
+                        # Actually, let's just force a standard name if we are creating it
+                        if target_col not in df_merged.columns:
+                             # It might have been suffixed by merge if collision
+                             target_col = m_type_col + "_master"
+                        
+                        type_col = target_col
+                    else:
+                        # Fill missing types in original with master data
+                        df_merged[type_col] = df_merged[m_type_col].fillna(df_merged[type_col])
+                
+                if m_sys_col:
+                    system_col = m_sys_col
+                    if system_col in df_rel.columns: system_col += "_master"
+                
+                if m_space_col:
+                    space_col = m_space_col
+                    if space_col in df_rel.columns: space_col += "_master"
+                
+                df_rel = df_merged
         
         if not (fecha_col and equipo_col):
             st.error("Faltan columnas clave (Fecha, Equipo) en la bitácora para realizar el análisis.")
         else:
-            # Optional: Filter by Asset Type if column exists
-            if type_col:
+            # Filters
+            if space_col and space_col in df_rel.columns:
+                all_spaces = sorted(list(df_rel[space_col].dropna().unique()))
+                sel_spaces = st.multiselect("Filtrar por Espacio/Edificio", all_spaces, key="rel_space_filter")
+                if sel_spaces:
+                    df_rel = df_rel[df_rel[space_col].isin(sel_spaces)]
+            
+            if system_col and system_col in df_rel.columns:
+                all_systems = sorted(list(df_rel[system_col].dropna().unique()))
+                sel_systems = st.multiselect("Filtrar por Sistema", all_systems, key="rel_sys_filter")
+                if sel_systems:
+                    df_rel = df_rel[df_rel[system_col].isin(sel_systems)]
+
+            if type_col and type_col in df_rel.columns:
                 all_types = sorted(list(df_rel[type_col].dropna().unique()))
-                # Default to 'Equipo' if present, else all
                 default_types = [t for t in all_types if "equipo" in str(t).lower()]
-                if not default_types: 
-                    default_types = all_types
+                if not default_types: default_types = all_types
                 
-                selected_types = st.multiselect("Filtrar por Tipo de Activo", all_types, default=default_types)
+                selected_types = st.multiselect("Filtrar por Tipo de Activo", all_types, default=default_types, key="rel_type_filter")
                 if selected_types:
                     df_rel = df_rel[df_rel[type_col].isin(selected_types)]
             
