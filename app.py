@@ -11,7 +11,10 @@ import plotly.express as px
 import numpy as np
 
 # Página ancha y título
-st.set_page_config(layout="wide", page_title="Dashboard")
+st.set_page_config(layout="wide", page_title="Dashboard Mantención")
+
+# MENSAJE DE PRUEBA DE COPILOT (BORRAR DESPUÉS)
+st.toast("¡Conexión Exitosa! Copilot ha modificado este archivo.", icon="✅")
 
 # Global CSS for a more professional look
 _GLOBAL_CSS = """
