@@ -129,18 +129,27 @@ def load_sheets(xls_path: Path) -> tuple[Dict[str, pd.DataFrame], str]:
                         loaded_data[sheet_name] = pd.DataFrame()
                     else:
                         loaded_data[sheet_name] = pd.DataFrame(data)
-                except gspread.WorksheetNotFound:
+                except Exception as e:
+                    # Catch WorksheetNotFound AND APIError (500) to prevent full crash
+                    # If it's a critical sheet like tbl_bitacora, we try fallback.
+                    # If it's optional, we just ignore it.
+                    is_missing = "WorksheetNotFound" in str(type(e).__name__) or "not found" in str(e).lower()
+                    
                     if sheet_name == "tbl_bitacora":
                         # Fallback for main sheet
                         try:
                             ws = sh.get_worksheet(0)
                             data = ws.get_all_records()
                             loaded_data[sheet_name] = pd.DataFrame(data)
-                            st.warning(f"No se encontró 'tbl_bitacora', usando la primera hoja: '{ws.title}'")
+                            if is_missing:
+                                st.warning(f"No se encontró 'tbl_bitacora', usando la primera hoja: '{ws.title}'")
+                            else:
+                                st.warning(f"Error cargando 'tbl_bitacora' ({e}), intentando con la primera hoja: '{ws.title}'")
                         except:
                             loaded_data[sheet_name] = pd.DataFrame()
                     else:
-                        # Optional sheets return empty if missing
+                        # Optional sheets return empty if missing or error
+                        # print(f"Warning: Could not load {sheet_name}: {e}")
                         loaded_data[sheet_name] = pd.DataFrame()
 
             return loaded_data, "☁️ Google Sheets (Nube)"
