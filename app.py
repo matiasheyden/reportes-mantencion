@@ -401,8 +401,8 @@ def main():
                 default_end = valid_dates.max()
 
             c_dates = st.columns(2)
-            start = c_dates[0].date_input("Fecha inicio", value=default_start, key="kpi_start")
-            end = c_dates[1].date_input("Fecha fin", value=default_end, key="kpi_end")
+            start = c_dates[0].date_input("Fecha inicio", value=default_start, key="kpi_start", format="DD/MM/YYYY")
+            end = c_dates[1].date_input("Fecha fin", value=default_end, key="kpi_end", format="DD/MM/YYYY")
 
             # Filter Bitacora
             mask = (df_k["__fecha_date"] >= start) & (df_k["__fecha_date"] <= end)
@@ -693,8 +693,8 @@ def main():
                 
                 # Date Filter for Pareto
                 c_p1, c_p2 = st.columns(2)
-                p_start = c_p1.date_input("Inicio Pareto", value=df_rel["__date"].min(), key="p_start")
-                p_end = c_p2.date_input("Fin Pareto", value=df_rel["__date"].max(), key="p_end")
+                p_start = c_p1.date_input("Inicio Pareto", value=df_rel["__date"].min(), key="p_start", format="DD/MM/YYYY")
+                p_end = c_p2.date_input("Fin Pareto", value=df_rel["__date"].max(), key="p_end", format="DD/MM/YYYY")
                 
                 df_p = df_rel[(df_rel["__date"].dt.date >= p_start) & (df_rel["__date"].dt.date <= p_end)].copy()
                 
@@ -1238,7 +1238,7 @@ def main():
                 max_date = valid_dates.max()
 
             # automatic update when choosing a date/turno (use unique keys to avoid widget id collision)
-            date_selected = st.date_input("Fecha", value=max_date, key="bit_fecha")
+            date_selected = st.date_input("Fecha", value=max_date, key="bit_fecha", format="DD/MM/YYYY")
             turno_col = find_column(df_local, ["turno", "shift"]) or None
             turno_selected = "Todos"
             if turno_col:
