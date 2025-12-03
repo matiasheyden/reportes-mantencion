@@ -591,7 +591,7 @@ def main():
                 y_data.append(None)
                 text_data.append(f"${available:,.0f}")
                 
-                # Create Figure with White Background style to match reference
+                # Create Figure with Professional Dark Theme style
                 fig = go.Figure(go.Waterfall(
                     name = "20", orientation = "v",
                     measure = measure,
@@ -599,24 +599,40 @@ def main():
                     textposition = "outside",
                     text = text_data,
                     y = y_data,
-                    connector = {"line":{"color":"#333333", "width": 1}},
-                    decreasing = {"marker":{"color":"#c00000"}}, # Dark Red for costs
-                    increasing = {"marker":{"color":"#0f52ba"}}, # Dark Blue for budget
-                    totals = {"marker":{"color":"#0f52ba"}},     # Dark Blue for result
-                    textfont = {"size": 14, "color": "black", "family": "Arial"}
+                    connector = {"line":{"color":"rgba(255,255,255,0.5)", "width": 1, "dash": "solid"}},
+                    decreasing = {"marker":{"color":"#ff4b4b", "line":{"color":"#ff4b4b", "width":0}}}, # Bright Red
+                    increasing = {"marker":{"color":"#2E86C1", "line":{"color":"#2E86C1", "width":0}}}, # Professional Blue
+                    totals = {"marker":{"color":"#2E86C1", "line":{"color":"#2E86C1", "width":0}}},     # Professional Blue
+                    textfont = {"size": 13, "color": "white", "family": "Arial, sans-serif"}
                 ))
                 
                 fig.update_layout(
-                    title = dict(text=f"Presupuesto vs Gastos ({selected_year})", font=dict(size=20, color="black")),
+                    title = dict(
+                        text=f"<b>Flujo de Caja Anual {selected_year}</b><br><span style='font-size:14px;color:#a0a0a0'>Presupuesto vs Gastos Reales</span>", 
+                        font=dict(size=24, color="white")
+                    ),
                     showlegend = False,
-                    plot_bgcolor = "white",
-                    paper_bgcolor = "white",
-                    font = dict(color="black", size=12),
-                    xaxis = dict(tickfont=dict(size=12, color="black"), showgrid=False),
-                    yaxis = dict(tickfont=dict(size=12, color="black"), title="Monto ($)", showgrid=True, gridcolor="#e5e5e5"),
+                    plot_bgcolor = "rgba(0,0,0,0)",
+                    paper_bgcolor = "rgba(0,0,0,0)",
+                    font = dict(color="#e0e0e0", size=12, family="Arial, sans-serif"),
+                    xaxis = dict(
+                        tickfont=dict(size=12, color="#e0e0e0"), 
+                        showgrid=False,
+                        showline=True,
+                        linecolor="rgba(255,255,255,0.2)"
+                    ),
+                    yaxis = dict(
+                        tickfont=dict(size=12, color="#e0e0e0"), 
+                        title="Monto ($)", 
+                        showgrid=True, 
+                        gridcolor="rgba(255,255,255,0.05)",
+                        zeroline=True,
+                        zerolinecolor="rgba(255,255,255,0.2)"
+                    ),
                     autosize=True,
-                    height=500,
-                    bargap=0.2
+                    height=600,
+                    bargap=0.25,
+                    margin=dict(l=40, r=40, t=80, b=40)
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
