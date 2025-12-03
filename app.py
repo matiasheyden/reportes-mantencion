@@ -425,6 +425,209 @@ def main():
                         except Exception:
                             st.dataframe(top5.reset_index(drop=True))
 
+    # Control Presupuestario
+    elif selection == "Control Presupuestario":
+        st.subheader("Control Presupuestario (Budget vs Actual)")
+        
+        # 1. Load DataFrames
+        df_om = sheets.get("OM", pd.DataFrame())
+        df_presupuesto = sheets.get("Presupuesto", pd.DataFrame())
+        df_otros = sheets.get("Otros_Gastos", pd.DataFrame())
+        
+        # 2. Validate Columns
+        # Check OM columns
+        om_date_col = find_column(df_om, ["fecha entrada", "fecha inicio", "date"])
+        om_rep_col = find_column(df_om, ["costo repuestos", "repuestos"])
+        om_serv_col = find_column(df_om, ["costo servicios", "servicios"])
+        
+        # Check Presupuesto columns
+        pre_year_col = find_column(df_presupuesto, ["año", "year"])
+        pre_month_col = find_column(df_presupuesto, ["mes", "month"])
+        pre_amount_col = find_column(df_presupuesto, ["monto", "presupuesto", "budget"])
+        
+        # Check Otros_Gastos columns
+        og_date_col = find_column(df_otros, ["fecha", "date"])
+        og_amount_col = find_column(df_otros, ["monto", "amount", "valor"])
+        og_cat_col = find_column(df_otros, ["categoria", "category", "tipo"])
+        
+        if df_presupuesto.empty or not (pre_year_col and pre_month_col and pre_amount_col):
+            st.warning("⚠️ La hoja 'Presupuesto' está vacía o le faltan columnas (Año, Mes, Monto_Presupuesto). Por favor complétala en Google Sheets.")
+        else:
+            # --- PROCESS DATA ---
+            
+            # A. Process Budget (Presupuesto)
+            # Filter by Year (assume current year or let user select)
+            current_year = datetime.date.today().year
+            years_avail = sorted(df_presupuesto[pre_year_col].unique())
+            selected_year = st.selectbox("Seleccionar Año", years_avail, index=len(years_avail)-1 if years_avail else 0)
+            
+            budget_df = df_presupuesto[df_presupuesto[pre_year_col] == selected_year].copy()
+            
+            # Map month names to numbers if necessary, or ensure they are consistent
+            # For simplicity, let's assume they are strings like "Enero", "Febrero" or numbers 1-12
+            # We will try to standardize to Month Number for sorting
+            month_map = {
+                "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
+                "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12
+            }
+            
+            def get_month_num(val):
+                if isinstance(val, int): return val
+                s = str(val).lower().strip()
+                return month_map.get(s, 0)
+
+            budget_df["_month_num"] = budget_df[pre_month_col].apply(get_month_num)
+            budget_df = budget_df.sort_values("_month_num")
+            
+            # B. Process Actuals (Gastos)
+            actuals = []
+            
+            # B1. From OM (Repuestos & Servicios)
+            if not df_om.empty and om_date_col:
+                # Clean and parse dates
+                df_om["_date"] = pd.to_datetime(df_om[om_date_col], errors="coerce", dayfirst=True)
+                df_om["_year"] = df_om["_date"].dt.year
+                df_om["_month"] = df_om["_date"].dt.month
+                
+                # Filter by selected year
+                df_om_year = df_om[df_om["_year"] == selected_year]
+                
+                # Sum Repuestos
+                if om_rep_col:
+                    rep_sum = df_om_year.groupby("_month")[om_rep_col].sum().reset_index()
+                    for _, r in rep_sum.iterrows():
+                        actuals.append({"Month": r["_month"], "Category": "Repuestos y Mat.", "Amount": r[om_rep_col]})
+                
+                # Sum Servicios
+                if om_serv_col:
+                    serv_sum = df_om_year.groupby("_month")[om_serv_col].sum().reset_index()
+                    for _, r in serv_sum.iterrows():
+                        actuals.append({"Month": r["_month"], "Category": "Contratistas", "Amount": r[om_serv_col]})
+
+            # B2. From Otros_Gastos
+            if not df_otros.empty and og_date_col and og_amount_col:
+                df_otros["_date"] = pd.to_datetime(df_otros[og_date_col], errors="coerce", dayfirst=True)
+                df_otros["_year"] = df_otros["_date"].dt.year
+                df_otros["_month"] = df_otros["_date"].dt.month
+                
+                df_otros_year = df_otros[df_otros["_year"] == selected_year]
+                
+                # Group by Month and Category
+                if og_cat_col:
+                    og_sum = df_otros_year.groupby(["_month", og_cat_col])[og_amount_col].sum().reset_index()
+                    for _, r in og_sum.iterrows():
+                        actuals.append({"Month": r["_month"], "Category": r[og_cat_col], "Amount": r[og_amount_col]})
+                else:
+                    # If no category, group all as "Otros"
+                    og_sum = df_otros_year.groupby("_month")[og_amount_col].sum().reset_index()
+                    for _, r in og_sum.iterrows():
+                        actuals.append({"Month": r["_month"], "Category": "Otros Gastos", "Amount": r[og_amount_col]})
+
+            # Create DataFrame for Actuals
+            df_actuals = pd.DataFrame(actuals)
+            
+            if df_actuals.empty:
+                st.info("No hay gastos registrados para este año.")
+            else:
+                # --- VISUALIZATION ---
+                
+                # 1. Monthly Selection for Waterfall
+                # Get list of months present in data
+                months_present = sorted(df_actuals["Month"].unique())
+                month_names = {1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio", 
+                               7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"}
+                
+                month_options = {m: month_names.get(m, str(m)) for m in months_present}
+                
+                # Default to latest month
+                selected_month_num = st.selectbox("Seleccionar Mes para Detalle", options=months_present, format_func=lambda x: month_options[x], index=len(months_present)-1)
+                
+                # Get Budget for this month
+                monthly_budget_row = budget_df[budget_df["_month_num"] == selected_month_num]
+                monthly_budget = monthly_budget_row[pre_amount_col].sum() if not monthly_budget_row.empty else 0
+                
+                # Get Actuals for this month
+                monthly_actuals = df_actuals[df_actuals["Month"] == selected_month_num].copy()
+                
+                # --- WATERFALL CHART ---
+                st.markdown(f"### Flujo de Caja - {month_options[selected_month_num]} {selected_year}")
+                
+                # Prepare data for Waterfall
+                # Start: Budget
+                # Decrements: Categories
+                # End: Remaining
+                
+                measure = ["absolute"]  # For Budget
+                x_data = ["Presupuesto"]
+                y_data = [monthly_budget]
+                text_data = [f"${monthly_budget:,.0f}"]
+                
+                total_spent = 0
+                
+                for _, row in monthly_actuals.iterrows():
+                    cat = row["Category"]
+                    amt = row["Amount"]
+                    measure.append("relative")
+                    x_data.append(cat)
+                    y_data.append(-amt) # Negative because it's a cost
+                    text_data.append(f"-${amt:,.0f}")
+                    total_spent += amt
+                
+                # Final: Available
+                available = monthly_budget - total_spent
+                measure.append("total")
+                x_data.append("Disponible")
+                y_data.append(None) # Calculated automatically by 'total' but we can force it if needed, usually 'total' computes sum of previous
+                # Actually for 'total' in plotly waterfall, it sums all previous. 
+                # Since we put budget as positive and costs as negative, the sum is exactly the remaining.
+                text_data.append(f"${available:,.0f}")
+                
+                fig = go.Figure(go.Waterfall(
+                    name = "20", orientation = "v",
+                    measure = measure,
+                    x = x_data,
+                    textposition = "outside",
+                    text = text_data,
+                    y = y_data,
+                    connector = {"line":{"color":"rgb(63, 63, 63)"}},
+                    decreasing = {"marker":{"color":"#ef4444"}}, # Red for costs
+                    increasing = {"marker":{"color":"#22c55e"}}, # Green for budget
+                    totals = {"marker":{"color":"#3b82f6"}}       # Blue for result
+                ))
+                
+                fig.update_layout(
+                    title = f"Presupuesto vs Gastos ({month_options[selected_month_num]})",
+                    showlegend = False,
+                    plot_bgcolor = "rgba(0,0,0,0)",
+                    paper_bgcolor = "rgba(0,0,0,0)",
+                    font = dict(color="white")
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # --- SUMMARY TABLE ---
+                st.markdown("### Resumen Anual")
+                
+                # Pivot table: Rows = Month, Cols = Category
+                pivot_df = df_actuals.pivot_table(index="Month", columns="Category", values="Amount", aggfunc="sum", fill_value=0)
+                
+                # Add Budget Column
+                budget_map = budget_df.set_index("_month_num")[pre_amount_col]
+                pivot_df["Presupuesto"] = pivot_df.index.map(budget_map).fillna(0)
+                
+                # Add Total Spent
+                cat_cols = [c for c in pivot_df.columns if c != "Presupuesto"]
+                pivot_df["Total Gastos"] = pivot_df[cat_cols].sum(axis=1)
+                
+                # Add Available
+                pivot_df["Disponible"] = pivot_df["Presupuesto"] - pivot_df["Total Gastos"]
+                
+                # Rename Index to Names
+                pivot_df.index = pivot_df.index.map(lambda x: month_names.get(x, x))
+                
+                # Format as currency (optional, string conversion)
+                st.dataframe(pivot_df.style.format("${:,.0f}"))
+
     # Por Fecha/Turno
     elif selection == "Bitácora":
         st.subheader("Bitácora")
