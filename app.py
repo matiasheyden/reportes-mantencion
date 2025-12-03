@@ -361,19 +361,7 @@ def main():
     # Load data (Google Sheets -> CSV -> Excel)
     sheets, source_type = load_sheets(xls)
     
-    # Show Source Indicator
-    if "Google Sheets" in source_type:
-        st.success(f"Fuente de Datos: {source_type}")
-    else:
-        st.warning(f"Fuente de Datos: {source_type}")
-    
-    # Debug: Show loaded sheets and columns (Temporary for verification)
-    with st.expander("Debug: Ver datos cargados (Google Sheets)", expanded=False):
-        st.write("Hojas cargadas:", list(sheets.keys()))
-        for name, data in sheets.items():
-            st.write(f"**{name}**: {data.shape[0]} filas, {data.shape[1]} columnas")
-            if not data.empty:
-                st.write(list(data.columns))
+    # (Bloques de Debug y Fuente de Datos eliminados a petición del usuario)
     
     # Check if we got any data
     if not sheets or "tbl_bitacora" not in sheets:
@@ -497,7 +485,14 @@ def main():
                 default_start = datetime.date.today()
                 default_end = datetime.date.today()
             else:
-                default_start = valid_dates.min()
+                # Default Start Date: 1 de Agosto 2025 (o el mínimo si es posterior)
+                # Esto permite que al cargar la página se muestre un rango "útil" por defecto
+                target_start = datetime.date(2025, 8, 1)
+                default_start = max(target_start, valid_dates.min()) if valid_dates.min() < target_start else valid_dates.min()
+                # Si la fecha objetivo es mayor que el máximo, usar el mínimo real
+                if default_start > valid_dates.max():
+                    default_start = valid_dates.min()
+                
                 default_end = valid_dates.max()
 
             c_dates = st.columns(2)
@@ -632,9 +627,9 @@ def main():
             # Display Metrics
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Disponibilidad Global", f"{global_avail:.2f}%")
-            m2.metric("Downtime Total (h)", f"{total_downtime/60:.1f}")
+            m2.metric("Tiempo Detención (h)", f"{total_downtime/60:.1f}")
             m3.metric("MTTR (min)", f"{mttr:.1f}")
-            m4.metric("Eventos de Falla", f"{total_failures}")
+            m4.metric("N° de Fallas", f"{total_failures}")
             
             st.info(f"ℹ️ Cálculo Híbrido: Antes del {PROGRAMMING_START_DATE.strftime('%d/%m/%Y')} se usa turno estándar (L-J 9.5h, V 6h). Desde esa fecha se usa `tbl_programacion` (o turno estándar si no hay datos).")
 
@@ -643,14 +638,14 @@ def main():
             # Detailed Table
             st.subheader("Detalle por Equipo")
             display_df = final_df.copy()
-            display_df["Downtime (min)"] = display_df["Downtime_Min"].round(1)
+            display_df["Tiempo Detención (min)"] = display_df["Downtime_Min"].round(1)
             display_df["Programado (min)"] = display_df["Programmed_Min"].round(1)
             display_df["Disponibilidad (%)"] = display_df["Availability"].round(2)
             
             display_df = display_df.sort_values("Disponibilidad (%)", ascending=True)
             
             st.dataframe(
-                display_df[["Equipo", "Disponibilidad (%)", "Downtime (min)", "Programado (min)"]],
+                display_df[["Equipo", "Disponibilidad (%)", "Tiempo Detención (min)", "Programado (min)"]],
                 use_container_width=True,
                 hide_index=True
             )
@@ -687,7 +682,7 @@ def main():
                     downtime_pct = max(0, 100 - avail)
                     
                     # Get raw values for tooltip
-                    raw_down = row_data["Downtime (min)"]
+                    raw_down = row_data["Tiempo Detención (min)"]
                     raw_prog = row_data["Programado (min)"]
                     
                     # Sanitize for display
@@ -700,14 +695,14 @@ def main():
                     
                     fig = px.pie(
                         values=[avail, downtime_pct], 
-                        names=["Disponible", "Downtime"], 
+                        names=["Disponible", "Detención"], 
                         title=f"{eq}<br>{avail:.1f}%",
                         color_discrete_sequence=["#22c55e", "#ef4444"],
                         hole=0.4
                     )
                     
                     # Add custom data for tooltip - Direct injection for reliability
-                    ht = f"<b>%{{label}}</b><br>%{{percent}}<br>Programado: {str_prog}<br>Downtime: {str_down}<extra></extra>"
+                    ht = f"<b>%{{label}}</b><br>%{{percent}}<br>Programado: {str_prog}<br>Detención: {str_down}<extra></extra>"
                     fig.update_traces(hovertemplate=ht)
                     
                     # Increased height and margins to prevent tooltip cutoff
@@ -876,7 +871,7 @@ def main():
                         summary_rows.append({
                             "Equipo": eq,
                             "Frecuencia": freq,
-                            "Downtime (min)": round(downtime, 1),
+                            "Tiempo Detención (min)": round(downtime, 1),
                             "Beta (β)": round(beta, 2) if not np.isnan(beta) else None,
                             "Eta (η)": round(eta, 1) if not np.isnan(eta) else None,
                             "Diagnóstico": diag
@@ -884,7 +879,7 @@ def main():
                     
                     df_summary = pd.DataFrame(summary_rows)
                     # Sort by Downtime desc
-                    df_summary = df_summary.sort_values("Downtime (min)", ascending=False)
+                    df_summary = df_summary.sort_values("Tiempo Detención (min)", ascending=False)
                     
                     st.dataframe(df_summary, use_container_width=True, hide_index=True)
 
@@ -903,7 +898,7 @@ def main():
                     if pareto_mode == "Por Tiempo de Falla (Impacto)":
                         grouped = df_p.groupby(equipo_col)["__downtime_min"].sum().reset_index()
                         grouped.columns = ["Equipo", "Valor"]
-                        y_label = "Minutos de Downtime"
+                        y_label = "Minutos de Detención"
                     else:
                         grouped = df_p.groupby(equipo_col).size().reset_index(name="Valor")
                         grouped.columns = ["Equipo", "Valor"]
