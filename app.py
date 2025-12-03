@@ -572,45 +572,24 @@ def main():
                     val_down = 0.0 if pd.isna(raw_down) else float(raw_down)
                     val_prog = 0.0 if pd.isna(raw_prog) else float(raw_prog)
                     
-                    # Format strings with thousands separator for better readability
+                    # Format strings
                     str_prog = f"{val_prog:,.1f} min" if val_prog > 0 else "Sin programación"
                     str_down = f"{val_down:,.1f} min"
                     
-                    # Use graph_objects for precise control over tooltip and styling
-                    fig = go.Figure(data=[go.Pie(
-                        labels=["Disponible", "Downtime"],
-                        values=[avail, downtime_pct],
-                        hole=0.5, # Slightly larger hole for modern look
-                        marker=dict(colors=["#22c55e", "#ef4444"]),
-                        textinfo='percent',
-                        hoverinfo='label+percent',
-                        # Custom data: List of lists, one per slice
-                        customdata=[[str_prog, str_down], [str_prog, str_down]],
-                        hovertemplate=(
-                            "<b>%{label}</b><br>" +
-                            "----------------<br>" +
-                            "Porcentaje: <b>%{percent}</b><br>" +
-                            "Programado: %{customdata[0]}<br>" +
-                            "Downtime: %{customdata[1]}" +
-                            "<extra></extra>" # Hides the secondary box
-                        )
-                    )])
-                    
-                    # Professional Layout
-                    fig.update_layout(
-                        title=dict(
-                            text=f"<b>{eq}</b><br><span style='font-size:14px; color:#cccccc'>Disp: {avail:.1f}%</span>",
-                            x=0.5,
-                            xanchor='center',
-                            y=0.95
-                        ),
-                        showlegend=False,
-                        margin=dict(t=50, b=10, l=10, r=10),
-                        height=220,
-                        paper_bgcolor='rgba(0,0,0,0)',
-                        plot_bgcolor='rgba(0,0,0,0)',
-                        font=dict(family="Inter, sans-serif", size=12, color="#ffffff")
+                    fig = px.pie(
+                        values=[avail, downtime_pct], 
+                        names=["Disponible", "Downtime"], 
+                        title=f"{eq}<br>{avail:.1f}%",
+                        color_discrete_sequence=["#22c55e", "#ef4444"],
+                        hole=0.4
                     )
+                    
+                    # Add custom data for tooltip - Direct injection for reliability
+                    ht = f"<b>%{{label}}</b><br>%{{percent}}<br>Programado: {str_prog}<br>Downtime: {str_down}<extra></extra>"
+                    fig.update_traces(hovertemplate=ht)
+                    
+                    # Increased height and margins to prevent tooltip cutoff
+                    fig.update_layout(showlegend=False, margin=dict(t=40, b=20, l=10, r=10), height=240)
                     
                     col_idx = idx % 4
                     if col_idx == 0 and idx > 0:
@@ -618,7 +597,7 @@ def main():
                         cols = st.columns(4)
                     
                     with cols[col_idx]:
-                        st.plotly_chart(fig, use_container_width=True, key=f"pie_{idx}", config={'displayModeBar': False})
+                        st.plotly_chart(fig, use_container_width=True, key=f"pie_{idx}")
 
 
     # Control Presupuestario
