@@ -568,6 +568,14 @@ def main():
                     raw_down = row_data["Downtime (min)"]
                     raw_prog = row_data["Programado (min)"]
                     
+                    # Sanitize for display
+                    val_down = 0.0 if pd.isna(raw_down) else float(raw_down)
+                    val_prog = 0.0 if pd.isna(raw_prog) else float(raw_prog)
+                    
+                    # Format strings
+                    str_prog = f"{val_prog:.1f} min" if val_prog > 0 else "Sin programación"
+                    str_down = f"{val_down:.1f} min"
+                    
                     fig = px.pie(
                         values=[avail, downtime_pct], 
                         names=["Disponible", "Downtime"], 
@@ -578,11 +586,12 @@ def main():
                     
                     # Add custom data for tooltip
                     fig.update_traces(
-                        customdata=[[raw_prog, raw_down]] * 2,
-                        hovertemplate="<b>%{label}</b><br>Porcentaje: %{percent}<br>Minutos Totales: %{customdata[0]:.1f}<br>Minutos Downtime: %{customdata[1]:.1f}<extra></extra>"
+                        customdata=[[str_prog, str_down]] * 2,
+                        hovertemplate="<b>%{label}</b><br>%{percent}<br>Programado: %{customdata[0]}<br>Downtime: %{customdata[1]}<extra></extra>"
                     )
                     
-                    fig.update_layout(showlegend=False, margin=dict(t=40, b=0, l=0, r=0), height=200)
+                    # Increased height and margins to prevent tooltip cutoff
+                    fig.update_layout(showlegend=False, margin=dict(t=40, b=20, l=10, r=10), height=240)
                     
                     col_idx = idx % 4
                     if col_idx == 0 and idx > 0:
