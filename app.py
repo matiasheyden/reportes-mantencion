@@ -61,6 +61,22 @@ a { color: #93c5fd !important; }
 """
 st.markdown(_GLOBAL_CSS, unsafe_allow_html=True)
 
+# JS Hack to clear URL fragment (hash) if present
+import streamlit.components.v1 as components
+components.html(
+    """
+    <script>
+        // Check if there is a hash in the URL
+        if (window.location.hash) {
+            // Remove the hash without reloading the page
+            history.replaceState(null, null, window.location.pathname + window.location.search);
+        }
+    </script>
+    """,
+    height=0,
+    width=0
+)
+
 
 def find_column(df: pd.DataFrame, keywords: List[str]) -> Optional[str]:
     for col in df.columns:
@@ -383,61 +399,94 @@ def main():
             downtime_by_eq = period.groupby(equipo_col_k)["__downtime_min"].sum().reset_index()
             downtime_by_eq.columns = ["Equipo", "Downtime_Min"]
             
-            # Calculate Programmed Time
-            programmed_by_eq = pd.DataFrame(columns=["Equipo", "Programmed_Min"])
+            # --- HYBRID PROGRAMMED TIME CALCULATION ---
+            # Logic:
+            # 1. Generate all (Date, Equipment) pairs for the selected range.
+            # 2. If Date < Cutoff (Nov 1, 2025): Use Standard Shift (Mon-Thu 9.5h, Fri 6h).
+            # 3. If Date >= Cutoff: Check tbl_programacion. If exists, use it. If NaN, fallback to Standard Shift.
             
-            use_programacion = False
+            PROGRAMMING_START_DATE = datetime.date(2025, 11, 1)
+            
+            # Helper for Standard Shift
+            def get_standard_shift_minutes(d):
+                # Mon=0, Sun=6
+                wd = d.weekday()
+                if wd <= 3: # Mon-Thu: 08:00-18:00 (10h) - 30m lunch = 9.5h
+                    return 9.5 * 60
+                elif wd == 4: # Fri: 08:00-14:30 (6.5h) - 30m lunch = 6.0h
+                    return 6.0 * 60
+                else: # Sat-Sun
+                    return 0.0
+
+            # 1. Get list of all equipments (from Bitacora + Programacion to be safe)
+            eq_list_bit = df_k[equipo_col_k].unique() if equipo_col_k else []
+            eq_list_prog = []
+            
+            # Prepare Programacion DF if available
+            df_prog_clean = pd.DataFrame()
             if not df_prog.empty:
-                # Identify columns in Programacion
                 prog_date_col = find_column(df_prog, ["fecha", "date"])
                 prog_eq_col = find_column(df_prog, ["equipo", "ubic"])
                 prog_hrs_col = find_column(df_prog, ["horas", "hours", "programada"])
                 
                 if prog_date_col and prog_eq_col and prog_hrs_col:
-                    use_programacion = True
-                    # Parse dates Programacion
-                    df_prog["__fecha_parsed"] = pd.to_datetime(df_prog[prog_date_col], errors="coerce", dayfirst=True)
-                    df_prog["__fecha_date"] = df_prog["__fecha_parsed"].dt.date
+                    df_prog_clean = df_prog.copy()
+                    df_prog_clean["__date"] = pd.to_datetime(df_prog_clean[prog_date_col], errors="coerce", dayfirst=True).dt.date
+                    df_prog_clean["__eq"] = df_prog_clean[prog_eq_col]
                     
-                    # Filter Programacion
-                    mask_prog = (df_prog["__fecha_date"] >= start) & (df_prog["__fecha_date"] <= end)
-                    period_prog = df_prog[mask_prog].copy()
-                    
-                    # Group Programmed Time
-                    # Clean hours column (handle strings if any)
                     def clean_hours(x):
                         try:
-                            if isinstance(x, str):
-                                x = x.replace(",", ".")
+                            if isinstance(x, str): x = x.replace(",", ".")
                             return float(x)
-                        except:
-                            return 0.0
-                    
-                    period_prog["__hours_clean"] = period_prog[prog_hrs_col].apply(clean_hours)
-                    
-                    prog_grouped = period_prog.groupby(prog_eq_col)["__hours_clean"].sum().reset_index()
-                    prog_grouped["Programmed_Min"] = prog_grouped["__hours_clean"] * 60
-                    prog_grouped = prog_grouped.rename(columns={prog_eq_col: "Equipo"})
-                    programmed_by_eq = prog_grouped[["Equipo", "Programmed_Min"]]
-                else:
-                    st.warning("La hoja `tbl_programacion` existe pero no se reconocen las columnas (Fecha, Equipo, Horas). Usando cálculo 24h.")
+                        except: return 0.0
+                    df_prog_clean["__mins"] = df_prog_clean[prog_hrs_col].apply(clean_hours) * 60
+                    eq_list_prog = df_prog_clean["__eq"].unique()
+
+            all_equips = sorted(list(set(list(eq_list_bit) + list(eq_list_prog))))
+            
+            # 2. Generate Daily Grid
+            date_rng = pd.date_range(start, end, freq='D').date
+            
+            # Create Cartesian Product: Date x Equipment
+            # This ensures we calculate time for EVERY equipment for EVERY day
+            import itertools
+            cartesian = list(itertools.product(date_rng, all_equips))
+            df_grid = pd.DataFrame(cartesian, columns=["Date", "Equipo"])
+            
+            # 3. Merge with Programacion
+            if not df_prog_clean.empty:
+                df_grid = df_grid.merge(
+                    df_prog_clean[["__date", "__eq", "__mins"]], 
+                    left_on=["Date", "Equipo"], 
+                    right_on=["__date", "__eq"], 
+                    how="left"
+                )
+            else:
+                df_grid["__mins"] = math.nan
+            
+            # 4. Apply Logic
+            def calculate_daily_minutes(row):
+                # If we have specific programming, use it
+                if not pd.isna(row["__mins"]):
+                    return row["__mins"]
+                
+                # Fallback Logic (Standard Shift)
+                # Applies if Date < Cutoff OR if Date >= Cutoff but no data in tbl_programacion
+                return get_standard_shift_minutes(row["Date"])
+
+            df_grid["Programmed_Min"] = df_grid.apply(calculate_daily_minutes, axis=1)
+            
+            # 5. Aggregate by Equipment
+            programmed_by_eq = df_grid.groupby("Equipo")["Programmed_Min"].sum().reset_index()
             
             # Merge Logic
-            # We need a list of all equipments involved (either failed or programmed)
-            all_equips = pd.concat([downtime_by_eq["Equipo"], programmed_by_eq["Equipo"]]).unique()
             final_df = pd.DataFrame({"Equipo": all_equips})
             
             # Merge Downtime
             final_df = final_df.merge(downtime_by_eq, on="Equipo", how="left").fillna(0)
             
             # Merge Programmed
-            if use_programacion:
-                final_df = final_df.merge(programmed_by_eq, on="Equipo", how="left").fillna(0)
-            else:
-                # Fallback: 24h * days
-                days = (end - start).days + 1
-                total_min = days * 24 * 60
-                final_df["Programmed_Min"] = total_min
+            final_df = final_df.merge(programmed_by_eq, on="Equipo", how="left").fillna(0)
             
             # Calculate Availability
             # Avoid division by zero
@@ -465,10 +514,7 @@ def main():
             m3.metric("MTTR (min)", f"{mttr:.1f}")
             m4.metric("Eventos de Falla", f"{total_failures}")
             
-            if not use_programacion:
-                st.info("ℹ️ Mostrando cálculo basado en 24h/día. Para mayor precisión, asegúrese de que `tbl_programacion` esté cargada correctamente.")
-            else:
-                st.success("✅ Cálculo basado en Horas Programadas (`tbl_programacion`).")
+            st.info(f"ℹ️ Cálculo Híbrido: Antes del {PROGRAMMING_START_DATE.strftime('%d/%m/%Y')} se usa turno estándar (L-J 9.5h, V 6h). Desde esa fecha se usa `tbl_programacion` (o turno estándar si no hay datos).")
 
             st.markdown("---")
             
@@ -492,7 +538,23 @@ def main():
             st.subheader("Análisis Visual")
             
             equipos_list = sorted(display_df["Equipo"].astype(str).unique())
-            sel_equipos = st.multiselect("Seleccionar Equipos para Gráfico", options=equipos_list, default=equipos_list[:4])
+            
+            # Default selection from user request
+            default_selection = [
+                "TROZADORA 2 (VERDE)", "TROZADORA 1 (AZUL)", "Sistema extracción", "Sistema cloracion agua", 
+                "Sala de compresores", "Sala de bombas", "REX", "Pantografo CNC", 
+                "PRENSA GLT N°3 (16 MTS)", "PRENSA GLT N°2 (24 MTS)", "PRENSA GLT N° 1 (9 MTS)", "PRENSA GLT CURVA", 
+                "PRENSA CLT", "PBA", "MOLDURERA WEINIG", "Moldurera SCM", "Cepillo 1000", 
+                "Encoladora CLT", "Encoladora GLT", "Encoladora prensa curva", "Escuadradora", 
+                "FINGER (24 mts)", "FINGER (6 mts)", "FINGER 3", "Generador Planta", "K2", "MOLDURERA 1"
+            ]
+            # Filter defaults to only those that actually exist in the data
+            valid_defaults = [e for e in default_selection if e in equipos_list]
+            if not valid_defaults:
+                valid_defaults = equipos_list[:4]
+
+            with st.expander("Opciones de Visualización (Filtro de Equipos)", expanded=False):
+                sel_equipos = st.multiselect("Seleccionar Equipos para Gráfico", options=equipos_list, default=valid_defaults)
             
             if sel_equipos:
                 cols = st.columns(min(4, len(sel_equipos)))
@@ -502,6 +564,10 @@ def main():
                     avail = max(0, avail)
                     downtime_pct = max(0, 100 - avail)
                     
+                    # Get raw values for tooltip
+                    raw_down = row_data["Downtime (min)"]
+                    raw_prog = row_data["Programado (min)"]
+                    
                     fig = px.pie(
                         values=[avail, downtime_pct], 
                         names=["Disponible", "Downtime"], 
@@ -509,6 +575,13 @@ def main():
                         color_discrete_sequence=["#22c55e", "#ef4444"],
                         hole=0.4
                     )
+                    
+                    # Add custom data for tooltip
+                    fig.update_traces(
+                        customdata=[[raw_prog, raw_down]] * 2,
+                        hovertemplate="<b>%{label}</b><br>Porcentaje: %{percent}<br>Minutos Totales: %{customdata[0]:.1f}<br>Minutos Downtime: %{customdata[1]:.1f}<extra></extra>"
+                    )
+                    
                     fig.update_layout(showlegend=False, margin=dict(t=40, b=0, l=0, r=0), height=200)
                     
                     col_idx = idx % 4
