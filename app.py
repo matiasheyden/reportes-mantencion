@@ -97,18 +97,34 @@ def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
                 st.error(f"No se encontró el Google Sheet con ID '{sheet_key}'. Asegúrate de compartirlo con el email del robot: {creds_dict.get('client_email', 'unknown')}")
                 return {}
 
-            # Read the specific worksheet
-            worksheet_name = "tbl_bitacora"
-            try:
-                ws = sh.worksheet(worksheet_name)
-            except gspread.WorksheetNotFound:
-                ws = sh.get_worksheet(0)
-                st.warning(f"No se encontró la hoja '{worksheet_name}', usando la primera hoja: '{ws.title}'")
+            # Read specific worksheets
+            sheets_to_load = ["tbl_bitacora", "OM", "Presupuesto", "Otros_Gastos"]
+            loaded_data = {}
+            
+            for sheet_name in sheets_to_load:
+                try:
+                    ws = sh.worksheet(sheet_name)
+                    data = ws.get_all_records()
+                    # If data is empty, create empty DataFrame
+                    if not data:
+                        loaded_data[sheet_name] = pd.DataFrame()
+                    else:
+                        loaded_data[sheet_name] = pd.DataFrame(data)
+                except gspread.WorksheetNotFound:
+                    if sheet_name == "tbl_bitacora":
+                        # Fallback for main sheet
+                        try:
+                            ws = sh.get_worksheet(0)
+                            data = ws.get_all_records()
+                            loaded_data[sheet_name] = pd.DataFrame(data)
+                            st.warning(f"No se encontró 'tbl_bitacora', usando la primera hoja: '{ws.title}'")
+                        except:
+                            loaded_data[sheet_name] = pd.DataFrame()
+                    else:
+                        # Optional sheets return empty if missing
+                        loaded_data[sheet_name] = pd.DataFrame()
 
-            # Convert to DataFrame
-            data = ws.get_all_records()
-            df = pd.DataFrame(data)
-            return {"tbl_bitacora": df}
+            return loaded_data
 
         except Exception as e:
             st.error(f"Error conectando a Google Sheets: {e}")
@@ -295,6 +311,14 @@ def main():
     
     # Load data (Google Sheets -> CSV -> Excel)
     sheets = load_sheets(xls)
+    
+    # Debug: Show loaded sheets and columns (Temporary for verification)
+    with st.expander("Debug: Ver datos cargados (Google Sheets)", expanded=False):
+        st.write("Hojas cargadas:", list(sheets.keys()))
+        for name, data in sheets.items():
+            st.write(f"**{name}**: {data.shape[0]} filas, {data.shape[1]} columnas")
+            if not data.empty:
+                st.write(list(data.columns))
     
     # Check if we got any data
     if not sheets or "tbl_bitacora" not in sheets:
