@@ -605,18 +605,24 @@ def main():
                     textposition = "outside",
                     text = text_data,
                     y = y_data,
-                    connector = {"line":{"color":"rgb(63, 63, 63)"}},
-                    decreasing = {"marker":{"color":"#ef4444"}}, # Red for costs
-                    increasing = {"marker":{"color":"#22c55e"}}, # Green for budget
-                    totals = {"marker":{"color":"#3b82f6"}}       # Blue for result
+                    connector = {"line":{"color":"rgba(255, 255, 255, 0.5)", "width": 2}},
+                    decreasing = {"marker":{"color":"#ef4444", "line":{"color":"white", "width":1}}}, # Red for costs
+                    increasing = {"marker":{"color":"#22c55e", "line":{"color":"white", "width":1}}}, # Green for budget
+                    totals = {"marker":{"color":"#3b82f6", "line":{"color":"white", "width":1}}},       # Blue for result
+                    textfont = {"size": 16, "color": "white", "family": "Arial Black"}
                 ))
                 
                 fig.update_layout(
-                    title = f"Presupuesto vs Gastos ({month_options[selected_month_num]})",
+                    title = dict(text=f"Presupuesto vs Gastos ({month_options[selected_month_num]})", font=dict(size=24)),
                     showlegend = False,
                     plot_bgcolor = "rgba(0,0,0,0)",
                     paper_bgcolor = "rgba(0,0,0,0)",
-                    font = dict(color="white")
+                    font = dict(color="white", size=16),
+                    xaxis = dict(tickfont=dict(size=14, color="white")),
+                    yaxis = dict(tickfont=dict(size=14, color="white"), title="Monto ($)"),
+                    autosize=True,
+                    height=600,
+                    bargap=0.15 # Make bars wider
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
