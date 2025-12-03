@@ -100,7 +100,7 @@ def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
                 return {}
 
             # Read specific worksheets
-            sheets_to_load = ["tbl_bitacora", "OM", "Presupuesto", "Otros_Gastos"]
+            sheets_to_load = ["tbl_bitacora", "OM", "Presupuesto", "Otros_Gastos", "tbl_programacion"]
             loaded_data = {}
             
             for sheet_name in sheets_to_load:
@@ -330,13 +330,22 @@ def main():
     df = sheets["tbl_bitacora"].copy()
 
     # Use explicit radio selector for sections to keep selection stable across reruns
-    selection = st.radio("Sección", ["KPI Dashboard", "Control Presupuestario", "Bitácora", "Disponibilidad"], index=0, key="app_tab")
+    selection = st.radio("Sección", ["KPI Dashboard", "Control Presupuestario", "Bitácora"], index=0, key="app_tab")
 
-    # KPI Dashboard (simple)
+    # KPI Dashboard (Merged)
     if selection == "KPI Dashboard":
-        st.subheader("KPI Dashboard")
+        st.subheader("KPI Dashboard & Disponibilidad")
+        
+        # 1. Load Bitacora
         target = "tbl_bitacora" if "tbl_bitacora" in sheets else sheet_choice
         df_k = sheets[target].copy()
+        
+        # 2. Load Programacion
+        df_prog = pd.DataFrame()
+        if "tbl_programacion" in sheets:
+            df_prog = sheets["tbl_programacion"].copy()
+        
+        # Identify columns in Bitacora
         fecha_col_k = find_column(df_k, ["fecha", "date"]) or ""
         equipo_col_k = find_column(df_k, ["ubic", "equipo"]) or ""
         det_min_col_k = find_column(df_k, ["detenci", "detencion", "downtime", "min"]) or None
@@ -346,84 +355,170 @@ def main():
         if fecha_col_k == "" or equipo_col_k == "":
             st.warning("tbl_bitacora no tiene columnas Fecha o Equipo reconocibles. Seleccione otra hoja.")
         else:
-            # Force dayfirst=True to handle DD/MM/YYYY correctly
+            # Parse dates Bitacora
             df_k["__fecha_parsed"] = pd.to_datetime(df_k[fecha_col_k], errors="coerce", dayfirst=True)
             df_k["__fecha_date"] = df_k["__fecha_parsed"].dt.date
-
+            
+            # Date Range Selector
             valid_dates = df_k["__fecha_date"].dropna()
             if valid_dates.empty:
-                st.warning("No se encontraron fechas válidas en la columna de fecha.")
                 default_start = datetime.date.today()
                 default_end = datetime.date.today()
             else:
                 default_start = valid_dates.min()
                 default_end = valid_dates.max()
 
-            start = st.date_input("Fecha inicio", value=default_start, key="kpi_start")
-            end = st.date_input("Fecha fin", value=default_end, key="kpi_end")
+            c_dates = st.columns(2)
+            start = c_dates[0].date_input("Fecha inicio", value=default_start, key="kpi_start")
+            end = c_dates[1].date_input("Fecha fin", value=default_end, key="kpi_end")
 
+            # Filter Bitacora
             mask = (df_k["__fecha_date"] >= start) & (df_k["__fecha_date"] <= end)
             period = df_k[mask].copy()
-
-            if period.empty:
-                st.info("No hay datos en el rango seleccionado.")
-            else:
-                period["__downtime_min"] = period.apply(lambda r: compute_downtime_minutes(r, det_min_col_k, inicio_col_k, fin_col_k), axis=1)
-                total_downtime = period["__downtime_min"].sum()
-                event_count = len(period)
-                period_minutes = ((end - start).days + 1) * 24 * 60
-                mttr = (total_downtime / event_count) if event_count > 0 else 0.0
-                mtbf = (period_minutes / event_count) if event_count > 0 else math.nan
-                availability = ((period_minutes - total_downtime) / period_minutes) * 100 if period_minutes > 0 else math.nan
-
-                c1, c2, c3, c4, c5 = st.columns(5)
-                c1.metric("Downtime total (min)", f"{total_downtime:.1f}")
-                c2.metric("Eventos", f"{event_count}")
-                c3.metric("MTTR (min)", f"{mttr:.1f}")
-                c4.metric("MTBF (min)", f"{mtbf:.1f}" if not math.isnan(mtbf) else "N/A")
-                c5.metric("Disponibilidad (%)", f"{availability:.2f}%")
-
-                st.markdown("---")
-                grouped = period.groupby(equipo_col_k).agg(events=(fecha_col_k, "count"), downtime_total=("__downtime_min", "sum")).reset_index()
-                grouped = grouped.sort_values(by="downtime_total", ascending=False)
-                st.subheader("Top equipos por downtime")
-                st.dataframe(grouped.head(50))
-                st.download_button("Descargar CSV - KPI por equipo", data=grouped.to_csv(index=False, encoding="utf-8-sig"), file_name="kpi_por_equipo.csv", mime="text/csv")
-
-                # Top 5 equipos por intervenciones con mini-pies
-                top5 = grouped.nlargest(5, "events")
-                if not top5.empty:
-                    st.subheader("Top 5 — Intervenciones y disponibilidad")
-                    cols = st.columns(min(5, len(top5)))
-                    try:
-                        import plotly.express as px
-                        for (i, row), col in zip(top5.iterrows(), cols):
-                            eq = row[equipo_col_k]
-                            ev = int(row["events"]) if not pd.isna(row["events"]) else 0
-                            down = float(row["downtime_total"]) if not pd.isna(row["downtime_total"]) else 0.0
-                            # estimate availability percent for mini-pie
-                            # use period_minutes as same used above
-                            avail_pct = max(0.0, 100.0 - (down / (period_minutes if period_minutes>0 else 1)) * 100.0)
-                            fig = px.pie(values=[avail_pct, 100 - avail_pct], names=["Disponible", "Downtime"], hole=0.4)
-                            fig.update_traces(textinfo='percent', hoverinfo='label+percent')
-                            fig.update_layout(margin=dict(t=20, b=20, l=10, r=10), showlegend=False)
-                            col.markdown(f"**{eq}**\nEventos: {ev}")
-                            # use unique key per mini-chart to avoid Streamlit auto-id collisions
-                            try:
-                                col.plotly_chart(fig, width='stretch', key=f"mini_pie_{i}_{str(eq)}")
-                            except TypeError:
-                                # older streamlit versions may not support width param; fallback to use_container_width
-                                col.plotly_chart(fig, use_container_width=True, key=f"mini_pie_{i}_{str(eq)}")
-                    except Exception as e:
-                        # fallback: simple table view with clear message
-                        st.warning(f"plotly no disponible o error al generar gráficos: {e}. Mostrando tabla en su lugar.")
+            
+            # Calculate Downtime
+            period["__downtime_min"] = period.apply(lambda r: compute_downtime_minutes(r, det_min_col_k, inicio_col_k, fin_col_k), axis=1)
+            
+            # Group Downtime by Equipment
+            downtime_by_eq = period.groupby(equipo_col_k)["__downtime_min"].sum().reset_index()
+            downtime_by_eq.columns = ["Equipo", "Downtime_Min"]
+            
+            # Calculate Programmed Time
+            programmed_by_eq = pd.DataFrame(columns=["Equipo", "Programmed_Min"])
+            
+            use_programacion = False
+            if not df_prog.empty:
+                # Identify columns in Programacion
+                prog_date_col = find_column(df_prog, ["fecha", "date"])
+                prog_eq_col = find_column(df_prog, ["equipo", "ubic"])
+                prog_hrs_col = find_column(df_prog, ["horas", "hours", "programada"])
+                
+                if prog_date_col and prog_eq_col and prog_hrs_col:
+                    use_programacion = True
+                    # Parse dates Programacion
+                    df_prog["__fecha_parsed"] = pd.to_datetime(df_prog[prog_date_col], errors="coerce", dayfirst=True)
+                    df_prog["__fecha_date"] = df_prog["__fecha_parsed"].dt.date
+                    
+                    # Filter Programacion
+                    mask_prog = (df_prog["__fecha_date"] >= start) & (df_prog["__fecha_date"] <= end)
+                    period_prog = df_prog[mask_prog].copy()
+                    
+                    # Group Programmed Time
+                    # Clean hours column (handle strings if any)
+                    def clean_hours(x):
                         try:
-                            if equipo_col_k and equipo_col_k in top5.columns:
-                                st.dataframe(top5[[equipo_col_k, 'events', 'downtime_total']])
-                            else:
-                                st.dataframe(top5)
-                        except Exception:
-                            st.dataframe(top5.reset_index(drop=True))
+                            if isinstance(x, str):
+                                x = x.replace(",", ".")
+                            return float(x)
+                        except:
+                            return 0.0
+                    
+                    period_prog["__hours_clean"] = period_prog[prog_hrs_col].apply(clean_hours)
+                    
+                    prog_grouped = period_prog.groupby(prog_eq_col)["__hours_clean"].sum().reset_index()
+                    prog_grouped["Programmed_Min"] = prog_grouped["__hours_clean"] * 60
+                    prog_grouped = prog_grouped.rename(columns={prog_eq_col: "Equipo"})
+                    programmed_by_eq = prog_grouped[["Equipo", "Programmed_Min"]]
+                else:
+                    st.warning("La hoja `tbl_programacion` existe pero no se reconocen las columnas (Fecha, Equipo, Horas). Usando cálculo 24h.")
+            
+            # Merge Logic
+            # We need a list of all equipments involved (either failed or programmed)
+            all_equips = pd.concat([downtime_by_eq["Equipo"], programmed_by_eq["Equipo"]]).unique()
+            final_df = pd.DataFrame({"Equipo": all_equips})
+            
+            # Merge Downtime
+            final_df = final_df.merge(downtime_by_eq, on="Equipo", how="left").fillna(0)
+            
+            # Merge Programmed
+            if use_programacion:
+                final_df = final_df.merge(programmed_by_eq, on="Equipo", how="left").fillna(0)
+            else:
+                # Fallback: 24h * days
+                days = (end - start).days + 1
+                total_min = days * 24 * 60
+                final_df["Programmed_Min"] = total_min
+            
+            # Calculate Availability
+            # Avoid division by zero
+            final_df["Availability"] = final_df.apply(
+                lambda r: ((r["Programmed_Min"] - r["Downtime_Min"]) / r["Programmed_Min"] * 100) 
+                if r["Programmed_Min"] > 0 else 0.0, axis=1
+            )
+            
+            # Global Metrics
+            total_downtime = final_df["Downtime_Min"].sum()
+            total_programmed = final_df["Programmed_Min"].sum()
+            
+            global_avail = ((total_programmed - total_downtime) / total_programmed * 100) if total_programmed > 0 else 0.0
+            
+            # MTTR / MTBF (Approximate)
+            total_failures = len(period)
+            
+            mttr = (total_downtime / total_failures) if total_failures > 0 else 0.0
+            mtbf = ((total_programmed - total_downtime) / total_failures) if total_failures > 0 else 0.0
+            
+            # Display Metrics
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Disponibilidad Global", f"{global_avail:.2f}%")
+            m2.metric("Downtime Total (h)", f"{total_downtime/60:.1f}")
+            m3.metric("MTTR (min)", f"{mttr:.1f}")
+            m4.metric("Eventos de Falla", f"{total_failures}")
+            
+            if not use_programacion:
+                st.info("ℹ️ Mostrando cálculo basado en 24h/día. Para mayor precisión, asegúrese de que `tbl_programacion` esté cargada correctamente.")
+            else:
+                st.success("✅ Cálculo basado en Horas Programadas (`tbl_programacion`).")
+
+            st.markdown("---")
+            
+            # Detailed Table
+            st.subheader("Detalle por Equipo")
+            display_df = final_df.copy()
+            display_df["Downtime (min)"] = display_df["Downtime_Min"].round(1)
+            display_df["Programado (min)"] = display_df["Programmed_Min"].round(1)
+            display_df["Disponibilidad (%)"] = display_df["Availability"].round(2)
+            
+            display_df = display_df.sort_values("Disponibilidad (%)", ascending=True)
+            
+            st.dataframe(
+                display_df[["Equipo", "Disponibilidad (%)", "Downtime (min)", "Programado (min)"]],
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # Pie Charts
+            st.markdown("---")
+            st.subheader("Análisis Visual")
+            
+            equipos_list = sorted(display_df["Equipo"].astype(str).unique())
+            sel_equipos = st.multiselect("Seleccionar Equipos para Gráfico", options=equipos_list, default=equipos_list[:4])
+            
+            if sel_equipos:
+                cols = st.columns(min(4, len(sel_equipos)))
+                for idx, eq in enumerate(sel_equipos):
+                    row_data = display_df[display_df["Equipo"] == eq].iloc[0]
+                    avail = row_data["Availability"]
+                    avail = max(0, avail)
+                    downtime_pct = max(0, 100 - avail)
+                    
+                    fig = px.pie(
+                        values=[avail, downtime_pct], 
+                        names=["Disponible", "Downtime"], 
+                        title=f"{eq}<br>{avail:.1f}%",
+                        color_discrete_sequence=["#22c55e", "#ef4444"],
+                        hole=0.4
+                    )
+                    fig.update_layout(showlegend=False, margin=dict(t=40, b=0, l=0, r=0), height=200)
+                    
+                    col_idx = idx % 4
+                    if col_idx == 0 and idx > 0:
+                        st.write("")
+                        cols = st.columns(4)
+                    
+                    with cols[col_idx]:
+                        st.plotly_chart(fig, use_container_width=True, key=f"pie_{idx}")
+
 
     # Control Presupuestario
     elif selection == "Control Presupuestario":
@@ -889,93 +984,6 @@ def main():
                         pass
                 else:
                     st.info("Para exportar a PDF instale la dependencia opcional 'reportlab' (pip install reportlab). El CSV sigue disponible.")
-
-    # Disponibilidad (tab3)
-    if selection == "Disponibilidad":
-        st.subheader("Disponibilidad por equipo")
-        if "tbl_bitacora" not in sheets:
-            st.info("No existe la hoja 'tbl_bitacora' en el archivo. Seleccione otra hoja en la caja superior.")
-        else:
-            df_bit = sheets["tbl_bitacora"].copy()
-            fecha_col_b = find_column(df_bit, ["fecha", "date"]) or ""
-            equipo_col_b = find_column(df_bit, ["ubic", "equipo"]) or ""
-            if fecha_col_b == "" or equipo_col_b == "":
-                st.error("tbl_bitacora no contiene 'Fecha' o 'Equipo' reconocibles.")
-            else:
-                # Force dayfirst=True
-                df_bit["__fecha_parsed"] = pd.to_datetime(df_bit[fecha_col_b], errors="coerce", dayfirst=True)
-                df_bit["__fecha_date"] = df_bit["__fecha_parsed"].dt.date
-                
-                valid_dates = df_bit["__fecha_date"].dropna()
-                if valid_dates.empty:
-                    default_s = datetime.date.today()
-                    default_e = datetime.date.today()
-                else:
-                    default_s = valid_dates.min()
-                    default_e = valid_dates.max()
-
-                s = st.date_input("Fecha inicio", value=default_s, key="disp_start")
-                e = st.date_input("Fecha fin", value=default_e, key="disp_end")
-                mask = (df_bit["__fecha_date"] >= s) & (df_bit["__fecha_date"] <= e)
-                period = df_bit[mask].copy()
-                if period.empty:
-                    st.info("No hay datos en el rango seleccionado.")
-                else:
-                    det_col = find_column(period, ["detenci", "detencion", "downtime", "min"]) or None
-                    inicio = find_column(period, ["inicio", "start"]) or None
-                    fin = find_column(period, ["fin", "end"]) or None
-                    period["__downtime_min"] = period.apply(lambda r: compute_downtime_minutes(r, det_col, inicio, fin), axis=1)
-                    grouped = period.groupby(equipo_col_b).agg(events=(fecha_col_b, "count"), total_downtime_min=("__downtime_min", "sum")).reset_index()
-                    period_minutes = ((e - s).days + 1) * 24 * 60
-                    grouped["availability_pct"] = ((period_minutes - grouped["total_downtime_min"]) / period_minutes).clip(lower=0) * 100
-                    grouped = grouped.sort_values(by="total_downtime_min", ascending=False)
-
-                    # Mostrar tabla sin índice como HTML (para que el contenido completo sea visible)
-                    display_g = grouped.rename(columns={equipo_col_b: "Ubicación/Equipo"})
-                    htmlg = display_g.to_html(index=False, escape=False)
-                    # force inline white text for iframe
-                    htmlg = htmlg.replace('<table', '<table style="color:#ffffff; background:transparent;"')
-                    htmlg = htmlg.replace('<th', '<th style="color:#ffffff; background:transparent;"')
-                    htmlg = htmlg.replace('<td', '<td style="color:#ffffff; background:transparent;"')
-                    styled_g = (
-                        """
-                    <style>
-                    table {border-collapse: collapse; width: 100%;}
-                    th, td {border: 1px solid #444; padding: 8px; text-align: left; vertical-align: top; white-space: pre-wrap; word-break: break-word;}
-                    a { color: #93c5fd !important; }
-                    </style>
-                    """ + htmlg)
-                    import streamlit.components.v1 as components
-                    components.html(styled_g, height=360, scrolling=True)
-
-                    st.download_button("Descargar CSV de disponibilidad", data=grouped.to_csv(index=False, encoding="utf-8-sig"), file_name="disponibilidad_por_equipo.csv", mime="text/csv")
-
-                    # Sección: gráficos circulares por equipo (selección)
-                    st.markdown("---")
-                    st.subheader("Gráficos circulares por equipo")
-                    equipos = list(grouped[equipo_col_b].astype(str))
-                    default_sel = equipos[:6]
-                    sel = st.multiselect("Seleccionar equipos (múltiple)", options=equipos, default=default_sel)
-                    if sel:
-                        # intentar usar plotly, si no está disponible mostrar barras como fallback
-                        try:
-                            import plotly.express as px
-                            for eq in sel:
-                                row = grouped[grouped[equipo_col_b].astype(str) == eq]
-                                if row.empty:
-                                    continue
-                                avail = float(row["availability_pct"].iloc[0])
-                                down = float(row["total_downtime_min"].iloc[0])
-                                fig = px.pie(values=[avail, 100 - avail], names=["Disponible (%)", "Downtime (%)"], title=f"{eq} — Disponibilidad {avail:.1f}%")
-                                # ensure each chart has unique key and uses new `width` param
-                                try:
-                                    st.plotly_chart(fig, width='stretch', key=f"disp_pie_{str(eq)}")
-                                except TypeError:
-                                    st.plotly_chart(fig, use_container_width=True, key=f"disp_pie_{str(eq)}")
-                        except Exception:
-                            # fallback: mostrar barras
-                            st.warning("plotly no disponible, mostrando barras en su lugar.")
-                            st.bar_chart(grouped.set_index(equipo_col_b)["availability_pct"].loc[sel])
 
 
 if __name__ == "__main__":
