@@ -8,6 +8,7 @@ import os
 import datetime
 import plotly.graph_objects as go
 import plotly.express as px
+import numpy as np
 
 # Página ancha y título
 st.set_page_config(layout="wide", page_title="Dashboard")
@@ -346,7 +347,7 @@ def main():
     df = sheets["tbl_bitacora"].copy()
 
     # Use explicit radio selector for sections to keep selection stable across reruns
-    selection = st.radio("Sección", ["KPI Dashboard", "Control Presupuestario", "Bitácora"], index=0, key="app_tab")
+    selection = st.radio("Sección", ["KPI Dashboard", "Análisis de Confiabilidad", "Control Presupuestario", "Bitácora"], index=0, key="app_tab")
 
     # KPI Dashboard (Merged)
     if selection == "KPI Dashboard":
@@ -598,6 +599,222 @@ def main():
                     
                     with cols[col_idx]:
                         st.plotly_chart(fig, use_container_width=True, key=f"pie_{idx}")
+
+    # Análisis de Confiabilidad (Pareto + Weibull)
+    elif selection == "Análisis de Confiabilidad":
+        st.subheader("Ingeniería de Mantenimiento: Pareto & Weibull")
+        
+        target = "tbl_bitacora" if "tbl_bitacora" in sheets else sheet_choice
+        df_rel = sheets[target].copy()
+        
+        # Identify columns
+        fecha_col = find_column(df_rel, ["fecha", "date"])
+        equipo_col = find_column(df_rel, ["ubic", "equipo"])
+        det_min_col = find_column(df_rel, ["detenci", "detencion", "downtime", "min"])
+        inicio_col = find_column(df_rel, ["inicio", "start"])
+        fin_col = find_column(df_rel, ["fin", "end"])
+        
+        if not (fecha_col and equipo_col):
+            st.error("Faltan columnas clave (Fecha, Equipo) en la bitácora para realizar el análisis.")
+        else:
+            # Parse dates
+            df_rel["__date"] = pd.to_datetime(df_rel[fecha_col], errors="coerce", dayfirst=True)
+            df_rel = df_rel.dropna(subset=["__date"])
+            
+            # Calculate Downtime if needed
+            if "__downtime_min" not in df_rel.columns:
+                df_rel["__downtime_min"] = df_rel.apply(lambda r: compute_downtime_minutes(r, det_min_col, inicio_col, fin_col), axis=1)
+            
+            # Tabs for sub-analyses
+            tab_pareto, tab_weibull = st.tabs(["📉 Análisis de Pareto", "⚙️ Análisis de Weibull"])
+            
+            # --- PARETO ---
+            with tab_pareto:
+                st.markdown("#### Principio 80/20: Identificación de Equipos Críticos")
+                
+                # Date Filter for Pareto
+                c_p1, c_p2 = st.columns(2)
+                p_start = c_p1.date_input("Inicio Pareto", value=df_rel["__date"].min(), key="p_start")
+                p_end = c_p2.date_input("Fin Pareto", value=df_rel["__date"].max(), key="p_end")
+                
+                df_p = df_rel[(df_rel["__date"].dt.date >= p_start) & (df_rel["__date"].dt.date <= p_end)].copy()
+                
+                if df_p.empty:
+                    st.info("No hay datos en el rango seleccionado.")
+                else:
+                    pareto_mode = st.radio("Criterio de Pareto", ["Por Tiempo de Falla (Impacto)", "Por Frecuencia de Falla"], horizontal=True)
+                    
+                    # Grouping
+                    if pareto_mode == "Por Tiempo de Falla (Impacto)":
+                        grouped = df_p.groupby(equipo_col)["__downtime_min"].sum().reset_index()
+                        grouped.columns = ["Equipo", "Valor"]
+                        y_label = "Minutos de Downtime"
+                    else:
+                        grouped = df_p.groupby(equipo_col).size().reset_index(name="Valor")
+                        grouped.columns = ["Equipo", "Valor"]
+                        y_label = "Cantidad de Fallas"
+                    
+                    # Sort descending
+                    grouped = grouped.sort_values("Valor", ascending=False)
+                    
+                    # Calculate Cumulative
+                    total_val = grouped["Valor"].sum()
+                    grouped["Porcentaje"] = (grouped["Valor"] / total_val) * 100
+                    grouped["Acumulado"] = grouped["Porcentaje"].cumsum()
+                    
+                    # Pareto Chart
+                    fig_pareto = go.Figure()
+                    
+                    # Bar Chart (Individual)
+                    fig_pareto.add_trace(go.Bar(
+                        x=grouped["Equipo"], 
+                        y=grouped["Valor"], 
+                        name=y_label,
+                        marker_color="#3b82f6"
+                    ))
+                    
+                    # Line Chart (Cumulative)
+                    fig_pareto.add_trace(go.Scatter(
+                        x=grouped["Equipo"], 
+                        y=grouped["Acumulado"], 
+                        name="% Acumulado",
+                        yaxis="y2",
+                        mode="lines+markers",
+                        marker_color="#ef4444"
+                    ))
+                    
+                    # Layout
+                    fig_pareto.update_layout(
+                        title=f"Pareto de {y_label}",
+                        yaxis=dict(title=y_label),
+                        yaxis2=dict(title="% Acumulado", overlaying="y", side="right", range=[0, 105]),
+                        showlegend=True,
+                        height=500,
+                        margin=dict(l=50, r=50, t=50, b=100)
+                    )
+                    
+                    st.plotly_chart(fig_pareto, use_container_width=True)
+                    
+                    # Interpretation
+                    top_80 = grouped[grouped["Acumulado"] <= 80]
+                    count_80 = len(top_80)
+                    total_eq = len(grouped)
+                    st.info(f"💡 **Insight:** {count_80} equipos (el {count_80/total_eq:.1%} del total) representan el 80% de los problemas. Enfocar esfuerzos en: {', '.join(top_80['Equipo'].head(5).tolist())}...")
+
+            # --- WEIBULL ---
+            with tab_weibull:
+                st.markdown("#### Análisis de Vida Útil (Weibull)")
+                st.markdown("Calcula el parámetro Beta (β) para diagnosticar el tipo de falla: Infantil, Aleatoria o Desgaste.")
+                
+                # Filter Equipments with enough data (> 4 failures)
+                counts = df_rel[equipo_col].value_counts()
+                valid_equips = counts[counts >= 5].index.tolist()
+                
+                if not valid_equips:
+                    st.warning("No hay equipos con suficientes fallas (mínimo 5) para un análisis Weibull confiable.")
+                else:
+                    w_eq = st.selectbox("Seleccionar Equipo para Análisis", sorted(valid_equips))
+                    
+                    # Get data for specific equipment
+                    df_w = df_rel[df_rel[equipo_col] == w_eq].copy()
+                    df_w = df_w.sort_values("__date")
+                    
+                    # Calculate TBF (Time Between Failures) in Days
+                    # We assume continuous operation for simplicity or use date diff
+                    df_w["prev_date"] = df_w["__date"].shift(1)
+                    df_w["days_diff"] = (df_w["__date"] - df_w["prev_date"]).dt.total_seconds() / (3600 * 24)
+                    
+                    # Drop first record (no TBF) and 0 TBFs (same day failures might need aggregation, but let's keep simple)
+                    tbf_data = df_w["days_diff"].dropna()
+                    tbf_data = tbf_data[tbf_data > 0].sort_values()
+                    
+                    if len(tbf_data) < 4:
+                        st.warning("Datos insuficientes para calcular TBF (se requieren al menos 4 intervalos válidos > 0).")
+                    else:
+                        # Weibull Fitting using Linear Regression on Median Ranks
+                        # ln(-ln(1-Median_Rank)) = Beta * ln(t) - Beta * ln(Eta)
+                        # Y = m * X + c
+                        # m = Beta
+                        # c = -Beta * ln(Eta)  =>  Eta = exp(-c / Beta)
+                        
+                        n = len(tbf_data)
+                        ranks = np.arange(1, n + 1)
+                        # Median Rank Approximation (Bernard's approximation)
+                        median_ranks = (ranks - 0.3) / (n + 0.4)
+                        
+                        # X and Y for regression
+                        x_reg = np.log(tbf_data.values)
+                        y_reg = np.log(-np.log(1 - median_ranks))
+                        
+                        # Linear Fit
+                        slope, intercept = np.polyfit(x_reg, y_reg, 1)
+                        
+                        beta = slope
+                        eta = np.exp(-intercept / beta)
+                        
+                        # Display Results
+                        c_w1, c_w2, c_w3 = st.columns(3)
+                        c_w1.metric("Beta (β) - Forma", f"{beta:.2f}")
+                        c_w2.metric("Eta (η) - Escala (días)", f"{eta:.1f}")
+                        c_w3.metric("Muestras (Fallas)", f"{n}")
+                        
+                        # Diagnosis
+                        if beta < 0.9:
+                            diag = "🔴 **Mortalidad Infantil:** Fallas prematuras. Revisar calidad de repuestos, instalación o procedimientos de arranque."
+                        elif 0.9 <= beta <= 1.1:
+                            diag = "🟡 **Fallas Aleatorias:** Tasa constante. Causas externas, operación indebida o sobrecarga. El mantenimiento preventivo basado en tiempo NO es efectivo aquí."
+                        else:
+                            diag = "🟢 **Desgaste (Wear-out):** El equipo está envejeciendo. El mantenimiento preventivo y sustitución programada SON efectivos."
+                        
+                        st.success(diag)
+                        
+                        # Weibull Plot (Probability Plot)
+                        fig_wei = go.Figure()
+                        
+                        # Scatter points
+                        fig_wei.add_trace(go.Scatter(
+                            x=tbf_data,
+                            y=y_reg, # Plotting linearized Y for straight line check is common, but let's plot CDF vs Time for intuitive view? 
+                            # Actually, standard Weibull plot is log-log. Let's stick to the linearized plot for technical accuracy or CDF for visual?
+                            # Let's plot CDF (Probability of Failure) vs Time
+                            mode='markers',
+                            name='Datos Reales',
+                            customdata=median_ranks,
+                            hovertemplate="TBF: %{x:.1f} días<br>Prob. Falla: %{customdata:.1%}"
+                        ))
+                        
+                        # Theoretical Line
+                        # F(t) = 1 - exp(-(t/eta)^beta)
+                        t_theoretical = np.linspace(tbf_data.min(), tbf_data.max(), 100)
+                        f_theoretical = 1 - np.exp(-(t_theoretical / eta) ** beta)
+                        # But to match the linearized Y axis of the regression check?
+                        # Let's plot the Probability Density Function (PDF) or CDF?
+                        # Let's plot CDF vs Time standard
+                        
+                        fig_wei = go.Figure()
+                        fig_wei.add_trace(go.Scatter(
+                            x=tbf_data, 
+                            y=median_ranks, 
+                            mode='markers', 
+                            name='Datos (Rangos Medianos)'
+                        ))
+                        
+                        fig_wei.add_trace(go.Scatter(
+                            x=t_theoretical,
+                            y=f_theoretical,
+                            mode='lines',
+                            name=f'Curva Weibull (β={beta:.2f})',
+                            line=dict(color='orange')
+                        ))
+                        
+                        fig_wei.update_layout(
+                            title=f"Curva de Probabilidad de Falla Acumulada - {w_eq}",
+                            xaxis_title="Tiempo entre Fallas (días)",
+                            yaxis_title="Probabilidad de Falla Acumulada F(t)",
+                            height=450
+                        )
+                        
+                        st.plotly_chart(fig_wei, use_container_width=True)
 
 
     # Control Presupuestario
