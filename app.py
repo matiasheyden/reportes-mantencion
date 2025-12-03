@@ -14,7 +14,7 @@ import numpy as np
 st.set_page_config(layout="wide", page_title="Dashboard Mantención")
 
 # MENSAJE DE PRUEBA DE COPILOT (BORRAR DESPUÉS)
-st.toast("¡Conexión Exitosa! Copilot ha modificado este archivo.", icon="✅")
+# st.toast("¡Conexión Exitosa! Copilot ha modificado este archivo.", icon="✅") # Eliminado tras confirmación
 
 # Global CSS for a more professional look
 _GLOBAL_CSS = """
@@ -353,8 +353,8 @@ def filter_by_date_and_turn(df: pd.DataFrame, date, turno):
 
 
 def main():
-    st.title("Reportes de Mantención - PRUEBA COPILOT 🚀")
-    st.error("⚠️ SI VES ESTO, LA CONEXIÓN ES EXITOSA ⚠️")
+    st.title("Reportes de Mantención")
+    # st.error("⚠️ SI VES ESTO, LA CONEXIÓN ES EXITOSA ⚠️") # Eliminado tras confirmación
     workspace = Path(__file__).parent
     xls = workspace / "BBDD_MANTENCION.xlsm"
     
@@ -1416,128 +1416,33 @@ def main():
                         hide_index=True
                     )
 
-    # Por Fecha/Turno
+    # Bitácora (Raw Data)
     elif selection == "Bitácora":
-        st.subheader("Bitácora")
-        fecha_col = find_column(df, ["fecha", "date"]) or ""
-        if fecha_col == "":
-            st.error("La hoja `tbl_bitacora` no contiene una columna de fecha reconocible.")
-        else:
-            df_local = df.copy()
-            # Force dayfirst=True to handle DD/MM/YYYY correctly
-            df_local["__fecha_parsed"] = pd.to_datetime(df_local[fecha_col], errors="coerce", dayfirst=True)
-            df_local["__fecha_date"] = df_local["__fecha_parsed"].dt.date
-            
-            valid_dates = df_local["__fecha_date"].dropna()
-            if valid_dates.empty:
-                max_date = datetime.date.today()
-            else:
-                max_date = valid_dates.max()
-
-            # automatic update when choosing a date/turno (use unique keys to avoid widget id collision)
-            date_selected = st.date_input("Fecha", value=max_date, key="bit_fecha", format="DD/MM/YYYY")
-            turno_col = find_column(df_local, ["turno", "shift"]) or None
-            turno_selected = "Todos"
-            if turno_col:
-                turnos = df_local[df_local["__fecha_date"] == date_selected][turno_col].dropna().unique()
-                options = ["Todos"] + sorted([str(t) for t in turnos])
-                turno_selected = st.selectbox("Turno", options, key="bit_turno")
-
-            expand = st.checkbox("Expandir vista completa", value=False, key="bit_expand")
-            height = 1100 if expand else 420
-
-            # apply filter automatically (no button)
-            filtered = filter_by_date_and_turn(df_local, date_selected, turno_selected)
-            if filtered.empty:
-                st.warning("No hay registros para los parámetros seleccionados.")
-            else:
-                # Preparar columnas a mostrar y formatear fecha
-                display = filtered.copy()
-                display["Fecha"] = display["__fecha_parsed"].dt.strftime("%d/%m/%y")
-                # columnas adicionales comunes
-                cols_to_try = [turno_col, find_column(filtered, ["ubic", "equipo"]), find_column(filtered, ["especial", "tipo"]), find_column(filtered, ["observ", "desc"]) ]
-                display_cols = [c for c in ["Fecha"] + cols_to_try if c and c in display.columns]
-                display = display[display_cols]
-
-                # Try to use st_aggrid if available for better UX (wrap text + per-column autoHeight)
-                desc_col_name = find_column(display, ["observ", "desc", "observaciones"]) or None
-                try:
-                    from st_aggrid import AgGrid, GridOptionsBuilder
-                    gb = GridOptionsBuilder.from_dataframe(display)
-                    # enable wrapping globally
-                    gb.configure_default_column(wrapText=True)
-                    # if a description-like column exists, enable autoHeight for it
-                    if desc_col_name:
-                        try:
-                            gb.configure_column(desc_col_name, autoHeight=True, wrapText=True)
-                        except Exception:
-                            pass
-                    # let grid auto-size vertically when possible
-                    gb.configure_grid_options(domLayout='autoHeight')
-                    gridOptions = gb.build()
-                    # estimate a reasonable max height (cap to avoid huge frames)
-                    est_rows = max(10, min(1000, display.shape[0]))
-                    max_h = min(2000, 40 + est_rows * 28)
-                    AgGrid(display, gridOptions=gridOptions, enable_enterprise_modules=False, fit_columns_on_grid_load=True, height=max_h)
-                except Exception:
-                    # Renderizar tabla completa sin índice usando HTML (permite mostrar todo el contenido)
-                    # estimate iframe height so rows can expand to show full content
-                    def estimate_table_height(df_local, text_col=None):
-                        rows = len(df_local)
-                        base = 28
-                        extra = 0
-                        if text_col and text_col in df_local.columns:
-                            for val in df_local[text_col].astype(str).fillna(""):
-                                l = len(val)
-                                # assume ~80 chars per wrapped line
-                                lines = max(1, (l // 80) + 1)
-                                extra += (lines - 1) * 16
-                        # also account for other cells with long text
-                        for col in df_local.columns:
-                            if col == text_col:
-                                continue
-                            for val in df_local[col].astype(str).fillna(""):
-                                if len(val) > 120:
-                                    extra += 8
-                        estimated = min(3000, max(300, rows * base + extra))
-                        return estimated
-
-                    html = display.to_html(index=False, escape=False)
-                    # force inline styles on table elements so iframe displays white text
-                    html = html.replace('<table', '<table style="color:#ffffff; background:transparent;"')
-                    html = html.replace('<th', '<th style="color:#ffffff; background:transparent;"')
-                    html = html.replace('<td', '<td style="color:#ffffff; background:transparent;"')
-                    height_est = estimate_table_height(display, desc_col_name)
-                    styled = (
-                        """
-                    <style>
-                    html, body {background-color: #0f1720; color: #fff;}
-                    table {border-collapse: collapse; width: 100%; font-size: 12px; font-family: Helvetica, Arial, sans-serif;}
-                    th {background: #1f2933; color: #fff; padding: 8px;}
-                    td {border: 1px solid #2b2b2b; padding: 8px; text-align: left; vertical-align: top; white-space: pre-wrap; word-break: break-word;}
-                    /* ensure links inside iframe are readable */
-                    a { color: #93c5fd !important; }
-                    </style>
-                    """ + html)
-                    import streamlit.components.v1 as components
-                    components.html(styled, height=int(height_est), scrolling=True)
-
-                # Descarga CSV
-                st.download_button("Descargar CSV", data=display.to_csv(index=False, encoding="utf-8-sig"), file_name="bitacora_reporte.csv", mime="text/csv")
-
-                # Exportar a PDF (intenta usar reportlab)
-                temp_pdf = Path("bitacora_reporte.pdf")
-                ok = generate_pdf_from_dataframe(display, str(temp_pdf))
-                if ok:
-                    with open(temp_pdf, "rb") as f:
-                        st.download_button("Descargar PDF (snapshot)", data=f, file_name="bitacora_reporte.pdf", mime="application/pdf")
-                    try:
-                        os.remove(temp_pdf)
-                    except Exception:
-                        pass
-                else:
-                    st.info("Para exportar a PDF instale la dependencia opcional 'reportlab' (pip install reportlab). El CSV sigue disponible.")
-
+        st.subheader("Bitácora de Mantenimiento (Datos Crudos)")
+        
+        target = "tbl_bitacora" if "tbl_bitacora" in sheets else sheet_choice
+        df_raw = sheets[target].copy()
+        
+        # Search
+        search_term = st.text_input("🔍 Buscar en Bitácora", placeholder="Escribe equipo, falla, técnico...")
+        
+        if search_term:
+            # Simple string search across all columns
+            mask = df_raw.astype(str).apply(lambda x: x.str.contains(search_term, case=False, na=False)).any(axis=1)
+            df_raw = df_raw[mask]
+        
+        st.dataframe(df_raw, use_container_width=True)
+        
+        # Export Button
+        # CSV
+        csv = df_raw.to_csv(index=False).encode('utf-8-sig')
+        st.download_button(
+            "📥 Descargar CSV",
+            csv,
+            "bitacora_filtrada.csv",
+            "text/csv",
+            key='download-csv'
+        )
 
 if __name__ == "__main__":
     main()
