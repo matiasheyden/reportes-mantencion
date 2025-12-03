@@ -660,6 +660,92 @@ def main():
                 # Format as currency (optional, string conversion)
                 st.dataframe(pivot_df.style.format("${:,.0f}"))
 
+                # --- DETAILED BREAKDOWN ---
+                st.markdown("---")
+                st.subheader("Desglose Detallado de Gastos")
+                
+                # Month selector for detail
+                detail_month_num = st.selectbox("Seleccionar Mes para ver Detalle", options=months_present, format_func=lambda x: month_options[x], index=len(months_present)-1)
+                
+                # Build detailed dataframe for this month
+                details = []
+                
+                # 1. From OM
+                # Re-filter safely
+                if not df_om.empty and om_date_col:
+                    # Ensure we have the year filtered data available or re-filter
+                    # We can reuse df_om (which has _year and _month cols added previously)
+                    om_month = df_om[(df_om["_year"] == selected_year) & (df_om["_month"] == detail_month_num)]
+                    
+                    # We need Description column
+                    om_desc_col = find_column(om_month, ["descripción", "descripcion", "desc. orden", "desc"])
+                    om_id_col = find_column(om_month, ["n° orden", "orden", "id"])
+                    
+                    for _, row in om_month.iterrows():
+                        desc = row[om_desc_col] if om_desc_col else "Sin descripción"
+                        oid = str(row[om_id_col]) if om_id_col else ""
+                        
+                        # Repuestos
+                        if om_rep_col and row[om_rep_col] > 0:
+                            details.append({
+                                "Fecha": row["_date"].strftime("%d/%m/%Y"),
+                                "Origen": f"OM {oid}",
+                                "Descripción": desc,
+                                "Categoría": "Repuestos y Mat.",
+                                "Monto": row[om_rep_col]
+                            })
+                        
+                        # Servicios
+                        if om_serv_col and row[om_serv_col] > 0:
+                            details.append({
+                                "Fecha": row["_date"].strftime("%d/%m/%Y"),
+                                "Origen": f"OM {oid}",
+                                "Descripción": desc,
+                                "Categoría": "Contratistas",
+                                "Monto": row[om_serv_col]
+                            })
+                            
+                # 2. From Otros Gastos
+                if not df_otros.empty and og_date_col:
+                    og_month = df_otros[(df_otros["_year"] == selected_year) & (df_otros["_month"] == detail_month_num)]
+                    og_desc_col = find_column(og_month, ["descripcion", "descripción", "detalle"])
+                    
+                    for _, row in og_month.iterrows():
+                        desc = row[og_desc_col] if og_desc_col else "Sin descripción"
+                        cat = row[og_cat_col] if og_cat_col else "Otros Gastos"
+                        
+                        details.append({
+                            "Fecha": row["_date"].strftime("%d/%m/%Y"),
+                            "Origen": "Otros Gastos",
+                            "Descripción": desc,
+                            "Categoría": cat,
+                            "Monto": row[og_amount_col]
+                        })
+                
+                if not details:
+                    st.info(f"No hay gastos detallados para {month_options[detail_month_num]}.")
+                else:
+                    df_details = pd.DataFrame(details)
+                    # Sort by date
+                    df_details = df_details.sort_values("Fecha")
+                    
+                    # Display with column config for better visuals
+                    st.dataframe(
+                        df_details,
+                        column_config={
+                            "Monto": st.column_config.NumberColumn(
+                                "Monto",
+                                format="$%d",
+                            ),
+                            "Fecha": st.column_config.TextColumn("Fecha"),
+                            "Origen": st.column_config.TextColumn("Origen"),
+                            "Descripción": st.column_config.TextColumn("Descripción", width="large"),
+                            "Categoría": st.column_config.TextColumn("Categoría"),
+                        },
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
     # Por Fecha/Turno
     elif selection == "Bitácora":
         st.subheader("Bitácora")
