@@ -552,6 +552,8 @@ def main():
                                7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"}
                 
                 # Calculate Annual Budget
+                # Clean budget column first to handle currency strings
+                budget_df[pre_amount_col] = budget_df[pre_amount_col].apply(clean_currency)
                 total_annual_budget = budget_df[pre_amount_col].sum()
                 
                 # Calculate Monthly Expenses
