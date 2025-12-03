@@ -664,11 +664,18 @@ def main():
                 st.markdown("---")
                 st.subheader("Desglose Detallado de Gastos")
                 
-                # Month selector for detail
-                detail_month_num = st.selectbox("Seleccionar Mes para ver Detalle", options=months_present, format_func=lambda x: month_options[x], index=len(months_present)-1)
+                # Re-calculate months present for the selector
+                months_present = sorted(df_actuals["Month"].unique())
+                month_options = {m: month_names.get(m, str(m)) for m in months_present}
                 
-                # Build detailed dataframe for this month
-                details = []
+                # Month selector for detail
+                if not months_present:
+                    st.info("No hay datos para mostrar detalle.")
+                else:
+                    detail_month_num = st.selectbox("Seleccionar Mes para ver Detalle", options=months_present, format_func=lambda x: month_options[x], index=len(months_present)-1)
+                    
+                    # Build detailed dataframe for this month
+                    details = []
                 
                 # 1. From OM
                 # Re-filter safely
