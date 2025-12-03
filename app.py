@@ -613,10 +613,23 @@ def main():
         det_min_col = find_column(df_rel, ["detenci", "detencion", "downtime", "min"])
         inicio_col = find_column(df_rel, ["inicio", "start"])
         fin_col = find_column(df_rel, ["fin", "end"])
+        type_col = find_column(df_rel, ["tipo", "type", "clasificacion", "category", "clase"])
         
         if not (fecha_col and equipo_col):
             st.error("Faltan columnas clave (Fecha, Equipo) en la bitácora para realizar el análisis.")
         else:
+            # Optional: Filter by Asset Type if column exists
+            if type_col:
+                all_types = sorted(list(df_rel[type_col].dropna().unique()))
+                # Default to 'Equipo' if present, else all
+                default_types = [t for t in all_types if "equipo" in str(t).lower()]
+                if not default_types: 
+                    default_types = all_types
+                
+                selected_types = st.multiselect("Filtrar por Tipo de Activo", all_types, default=default_types)
+                if selected_types:
+                    df_rel = df_rel[df_rel[type_col].isin(selected_types)]
+            
             # Parse dates
             df_rel["__date"] = pd.to_datetime(df_rel[fecha_col], errors="coerce", dayfirst=True)
             df_rel = df_rel.dropna(subset=["__date"])
