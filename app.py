@@ -89,7 +89,7 @@ def find_column(df: pd.DataFrame, keywords: List[str]) -> Optional[str]:
 
 
 @st.cache_data(ttl=600)
-def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
+def load_sheets(xls_path: Path) -> tuple[Dict[str, pd.DataFrame], str]:
     # 0. Try loading from Google Sheets (Cloud / Secrets)
     # Check if secrets are nested under [gcp_service_account] or at root
     creds_dict = None
@@ -114,7 +114,7 @@ def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
                 sh = client.open_by_key(sheet_key)
             except gspread.SpreadsheetNotFound:
                 st.error(f"No se encontró el Google Sheet con ID '{sheet_key}'. Asegúrate de compartirlo con el email del robot: {creds_dict.get('client_email', 'unknown')}")
-                return {}
+                return {}, "Error GSheets"
 
             # Read specific worksheets
             sheets_to_load = ["tbl_bitacora", "OM", "Presupuesto", "Otros_Gastos", "tbl_programacion"]
@@ -143,7 +143,7 @@ def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
                         # Optional sheets return empty if missing
                         loaded_data[sheet_name] = pd.DataFrame()
 
-            return loaded_data
+            return loaded_data, "☁️ Google Sheets (Nube)"
 
         except Exception as e:
             st.error(f"Error conectando a Google Sheets: {e}")
@@ -167,14 +167,14 @@ def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
             if csv_cache.stat().st_mtime >= xls_path.stat().st_mtime:
                 try:
                     df = pd.read_csv(csv_cache, parse_dates=True, encoding="utf-8-sig")
-                    return {"tbl_bitacora": df}
+                    return {"tbl_bitacora": df}, "📁 CSV Local (Caché)"
                 except Exception:
                     pass
         else:
             # Excel missing (Cloud scenario), just use CSV
             try:
                 df = pd.read_csv(csv_cache, parse_dates=True, encoding="utf-8-sig")
-                return {"tbl_bitacora": df}
+                return {"tbl_bitacora": df}, "📁 CSV Local (Sin Excel)"
             except Exception:
                 pass
 
@@ -188,12 +188,12 @@ def load_sheets(xls_path: Path) -> Dict[str, pd.DataFrame]:
                 df.to_csv(csv_cache, index=False, encoding="utf-8-sig")
             except Exception:
                 pass
-            return {"tbl_bitacora": df}
+            return {"tbl_bitacora": df}, "📁 Excel Local (.xlsm)"
         except Exception:
             # Last-resort: fall back to reading all sheets (original behaviour)
-            return pd.read_excel(xls_path, sheet_name=None, engine="openpyxl")
+            return pd.read_excel(xls_path, sheet_name=None, engine="openpyxl"), "📁 Excel Local (Completo)"
     
-    return {}
+    return {}, "❌ Sin Datos"
 
 
 def compute_downtime_minutes(row: pd.Series, det_min_col: Optional[str], inicio_col: Optional[str], fin_col: Optional[str]) -> float:
@@ -329,7 +329,13 @@ def main():
     xls = workspace / "BBDD_MANTENCION.xlsm"
     
     # Load data (Google Sheets -> CSV -> Excel)
-    sheets = load_sheets(xls)
+    sheets, source_type = load_sheets(xls)
+    
+    # Show Source Indicator
+    if "Google Sheets" in source_type:
+        st.success(f"Fuente de Datos: {source_type}")
+    else:
+        st.warning(f"Fuente de Datos: {source_type}")
     
     # Debug: Show loaded sheets and columns (Temporary for verification)
     with st.expander("Debug: Ver datos cargados (Google Sheets)", expanded=False):
