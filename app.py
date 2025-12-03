@@ -79,11 +79,28 @@ components.html(
 )
 
 
+import unicodedata
+
+def normalize_str(s: str) -> str:
+    """Remove accents and convert to lowercase."""
+    if not isinstance(s, str):
+        s = str(s)
+    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn').lower()
+
 def find_column(df: pd.DataFrame, keywords: List[str]) -> Optional[str]:
-    for col in df.columns:
-        low = str(col).lower()
-        for kw in keywords:
-            if kw in low:
+    """Find a column in df that matches any of the keywords (case-insensitive, accent-insensitive)."""
+    # Pre-normalize columns once
+    cols_norm = {col: normalize_str(col) for col in df.columns}
+    
+    for kw in keywords:
+        kw_norm = normalize_str(kw)
+        # 1. Try exact match first (normalized)
+        for col, col_n in cols_norm.items():
+            if col_n == kw_norm:
+                return col
+        # 2. Try partial match
+        for col, col_n in cols_norm.items():
+            if kw_norm in col_n:
                 return col
     return None
 
@@ -400,6 +417,7 @@ def main():
                 m_name_col = find_column(df_master, ["nombre", "equipo", "activo", "item"])
                 m_sys_col = find_column(df_master, ["sistema", "system"])
                 m_space_col = find_column(df_master, ["espacio", "edificio", "ubicacion", "area", "sector"])
+                m_type_col = find_column(df_master, ["tipo", "clase", "categoria"])
                 
                 if not m_name_col:
                     st.warning("⚠️ Se encontró `maestra_activos` pero falta la columna `Equipo`.")
@@ -409,22 +427,48 @@ def main():
                     filters_active = False
                     
                     # Layout for filters
-                    c_filt1, c_filt2 = st.columns(2)
+                    c_filt1, c_filt2, c_filt3 = st.columns(3)
                     
+                    # 1. Type Filter (New)
+                    if m_type_col:
+                        all_types = sorted(list(df_master[m_type_col].dropna().unique()))
+                        # Default to 'Equipo'
+                        default_types = [t for t in all_types if "equipo" in normalize_str(t)]
+                        # If no 'equipo' found, select all to avoid empty chart
+                        if not default_types: default_types = all_types
+                        
+                        sel_types = c_filt1.multiselect("Filtrar por Tipo", all_types, default=default_types, key="kpi_type_filter")
+                        if sel_types:
+                            df_master = df_master[df_master[m_type_col].isin(sel_types)]
+                            filters_active = True
+                    
+                    # 2. Space Filter
                     if m_space_col:
                         all_spaces = sorted(list(df_master[m_space_col].dropna().unique()))
-                        sel_spaces = c_filt1.multiselect("Filtrar por Espacio/Edificio", all_spaces, key="kpi_space_filter")
+                        sel_spaces = c_filt2.multiselect("Filtrar por Espacio/Edificio", all_spaces, key="kpi_space_filter")
                         if sel_spaces:
                             df_master = df_master[df_master[m_space_col].isin(sel_spaces)]
                             filters_active = True
                     else:
-                        # Optional warning if user expects this filter
-                        # st.warning("Falta columna 'Edificio' en maestra_activos")
                         pass
                     
+                    # 3. System Filter
                     if m_sys_col:
                         all_systems = sorted(list(df_master[m_sys_col].dropna().unique()))
-                        sel_systems = c_filt2.multiselect("Filtrar por Sistema", all_systems, key="kpi_sys_filter")
+                        sel_systems = c_filt3.multiselect("Filtrar por Sistema", all_systems, key="kpi_sys_filter")
+                        if sel_systems:
+                            df_master = df_master[df_master[m_sys_col].isin(sel_systems)]
+                            filters_active = True
+                    
+                    # If any filter is active (or default type filter applied), we filter the allowed equipments
+                    # Note: Even if user didn't touch filters, we applied default_types, so we should filter.
+                    if filters_active or (m_type_col and default_types):
+                        allowed_equips = set(df_master[m_name_col].astype(str).str.strip().unique())
+                    
+                    # 3. System Filter
+                    if m_sys_col:
+                        all_systems = sorted(list(df_master[m_sys_col].dropna().unique()))
+                        sel_systems = c_filt3.multiselect("Filtrar por Sistema", all_systems, key="kpi_sys_filter")
                         if sel_systems:
                             df_master = df_master[df_master[m_sys_col].isin(sel_systems)]
                             filters_active = True
