@@ -6,6 +6,8 @@ import math
 import io
 import os
 import datetime
+import plotly.graph_objects as go
+import plotly.express as px
 
 # Página ancha y título
 st.set_page_config(layout="wide", page_title="Dashboard")
@@ -328,7 +330,7 @@ def main():
     df = sheets["tbl_bitacora"].copy()
 
     # Use explicit radio selector for sections to keep selection stable across reruns
-    selection = st.radio("Sección", ["KPI Dashboard", "Bitácora", "Disponibilidad"], index=0, key="app_tab")
+    selection = st.radio("Sección", ["KPI Dashboard", "Control Presupuestario", "Bitácora", "Disponibilidad"], index=0, key="app_tab")
 
     # KPI Dashboard (simple)
     if selection == "KPI Dashboard":
@@ -424,7 +426,7 @@ def main():
                             st.dataframe(top5.reset_index(drop=True))
 
     # Por Fecha/Turno
-    if selection == "Bitácora":
+    elif selection == "Bitácora":
         st.subheader("Bitácora")
         fecha_col = find_column(df, ["fecha", "date"]) or ""
         if fecha_col == "":
