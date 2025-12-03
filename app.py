@@ -479,6 +479,15 @@ def main():
             budget_df["_month_num"] = budget_df[pre_month_col].apply(get_month_num)
             budget_df = budget_df.sort_values("_month_num")
             
+            def clean_currency(val):
+                if pd.isna(val): return 0.0
+                if isinstance(val, (int, float)): return float(val)
+                s = str(val).replace("$", "").replace(".", "").replace(",", ".") # Remove $ and thousands separator, fix decimal
+                try:
+                    return float(s)
+                except:
+                    return 0.0
+
             # B. Process Actuals (Gastos)
             actuals = []
             
@@ -490,16 +499,20 @@ def main():
                 df_om["_month"] = df_om["_date"].dt.month
                 
                 # Filter by selected year
-                df_om_year = df_om[df_om["_year"] == selected_year]
+                df_om_year = df_om[df_om["_year"] == selected_year].copy()
                 
                 # Sum Repuestos
                 if om_rep_col:
+                    # Clean currency column
+                    df_om_year[om_rep_col] = df_om_year[om_rep_col].apply(clean_currency)
                     rep_sum = df_om_year.groupby("_month")[om_rep_col].sum().reset_index()
                     for _, r in rep_sum.iterrows():
                         actuals.append({"Month": r["_month"], "Category": "Repuestos y Mat.", "Amount": r[om_rep_col]})
                 
                 # Sum Servicios
                 if om_serv_col:
+                    # Clean currency column
+                    df_om_year[om_serv_col] = df_om_year[om_serv_col].apply(clean_currency)
                     serv_sum = df_om_year.groupby("_month")[om_serv_col].sum().reset_index()
                     for _, r in serv_sum.iterrows():
                         actuals.append({"Month": r["_month"], "Category": "Contratistas", "Amount": r[om_serv_col]})
@@ -510,7 +523,10 @@ def main():
                 df_otros["_year"] = df_otros["_date"].dt.year
                 df_otros["_month"] = df_otros["_date"].dt.month
                 
-                df_otros_year = df_otros[df_otros["_year"] == selected_year]
+                df_otros_year = df_otros[df_otros["_year"] == selected_year].copy()
+                
+                # Clean amount column
+                df_otros_year[og_amount_col] = df_otros_year[og_amount_col].apply(clean_currency)
                 
                 # Group by Month and Category
                 if og_cat_col:
