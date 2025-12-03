@@ -389,26 +389,42 @@ def main():
         else:
             # --- MASTER DATA FILTERS (KPI) ---
             allowed_equips = None
-            if "maestra_activos" in sheets and not sheets["maestra_activos"].empty:
+            
+            # Debug / Info about Master Sheet
+            has_master = "maestra_activos" in sheets and not sheets["maestra_activos"].empty
+            if not has_master:
+                st.info("ℹ️ Para habilitar filtros por **Sistema** o **Edificio**, crea una hoja llamada `maestra_activos` en Google Sheets con las columnas: `Equipo`, `Sistema`, `Edificio`.")
+            
+            if has_master:
                 df_master = sheets["maestra_activos"].copy()
                 m_name_col = find_column(df_master, ["nombre", "equipo", "activo", "item"])
                 m_sys_col = find_column(df_master, ["sistema", "system"])
                 m_space_col = find_column(df_master, ["espacio", "edificio", "ubicacion", "area", "sector"])
                 
+                if not m_name_col:
+                    st.warning("⚠️ Se encontró `maestra_activos` pero falta la columna `Equipo`.")
+                
                 if m_name_col:
                     # Filters UI
                     filters_active = False
                     
+                    # Layout for filters
+                    c_filt1, c_filt2 = st.columns(2)
+                    
                     if m_space_col:
                         all_spaces = sorted(list(df_master[m_space_col].dropna().unique()))
-                        sel_spaces = st.multiselect("Filtrar por Espacio/Edificio", all_spaces, key="kpi_space_filter")
+                        sel_spaces = c_filt1.multiselect("Filtrar por Espacio/Edificio", all_spaces, key="kpi_space_filter")
                         if sel_spaces:
                             df_master = df_master[df_master[m_space_col].isin(sel_spaces)]
                             filters_active = True
+                    else:
+                        # Optional warning if user expects this filter
+                        # st.warning("Falta columna 'Edificio' en maestra_activos")
+                        pass
                     
                     if m_sys_col:
                         all_systems = sorted(list(df_master[m_sys_col].dropna().unique()))
-                        sel_systems = st.multiselect("Filtrar por Sistema", all_systems, key="kpi_sys_filter")
+                        sel_systems = c_filt2.multiselect("Filtrar por Sistema", all_systems, key="kpi_sys_filter")
                         if sel_systems:
                             df_master = df_master[df_master[m_sys_col].isin(sel_systems)]
                             filters_active = True
