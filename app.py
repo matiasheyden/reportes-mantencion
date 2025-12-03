@@ -684,19 +684,84 @@ def main():
             if "__downtime_min" not in df_rel.columns:
                 df_rel["__downtime_min"] = df_rel.apply(lambda r: compute_downtime_minutes(r, det_min_col, inicio_col, fin_col), axis=1)
             
-            # Tabs for sub-analyses
-            tab_pareto, tab_weibull = st.tabs(["📉 Análisis de Pareto", "⚙️ Análisis de Weibull"])
+            # Global Date Filter for Reliability Section
+            st.markdown("##### Rango de Análisis")
+            c_gen_1, c_gen_2 = st.columns(2)
+            gen_start = c_gen_1.date_input("Fecha Inicio", value=df_rel["__date"].min(), key="gen_start", format="DD/MM/YYYY")
+            gen_end = c_gen_2.date_input("Fecha Fin", value=df_rel["__date"].max(), key="gen_end", format="DD/MM/YYYY")
             
+            # Filter Data Global
+            df_gen = df_rel[(df_rel["__date"].dt.date >= gen_start) & (df_rel["__date"].dt.date <= gen_end)].copy()
+
+            # Tabs for sub-analyses
+            tab_resumen, tab_pareto, tab_weibull = st.tabs(["📋 Resumen General", "📉 Análisis de Pareto", "⚙️ Análisis de Weibull"])
+            
+            # --- RESUMEN GENERAL ---
+            with tab_resumen:
+                st.markdown("#### Resumen de Confiabilidad por Equipo")
+                if df_gen.empty:
+                    st.warning("No hay datos en el rango seleccionado.")
+                else:
+                    # Calculate Metrics per Equipment
+                    summary_rows = []
+                    unique_equips = df_gen[equipo_col].unique()
+                    
+                    for eq in unique_equips:
+                        df_eq = df_gen[df_gen[equipo_col] == eq]
+                        
+                        # Pareto Metrics
+                        freq = len(df_eq)
+                        downtime = df_eq["__downtime_min"].sum()
+                        
+                        # Weibull Metrics (Requires sorting and TBF)
+                        beta = np.nan
+                        eta = np.nan
+                        diag = "N/A (<4 fallas)"
+                        
+                        if freq >= 4:
+                            df_w = df_eq.sort_values("__date")
+                            df_w["prev_date"] = df_w["__date"].shift(1)
+                            df_w["days_diff"] = (df_w["__date"] - df_w["prev_date"]).dt.total_seconds() / (3600 * 24)
+                            tbf_data = df_w["days_diff"].dropna()
+                            tbf_data = tbf_data[tbf_data > 0].sort_values()
+                            
+                            if len(tbf_data) >= 4:
+                                try:
+                                    n = len(tbf_data)
+                                    ranks = np.arange(1, n + 1)
+                                    median_ranks = (ranks - 0.3) / (n + 0.4)
+                                    x_reg = np.log(tbf_data.values)
+                                    y_reg = np.log(-np.log(1 - median_ranks))
+                                    slope, intercept = np.polyfit(x_reg, y_reg, 1)
+                                    beta = slope
+                                    eta = np.exp(-intercept / beta)
+                                    
+                                    if beta < 0.9: diag = "Mortalidad Infantil"
+                                    elif 0.9 <= beta <= 1.1: diag = "Aleatoria"
+                                    else: diag = "Desgaste"
+                                except:
+                                    pass
+                        
+                        summary_rows.append({
+                            "Equipo": eq,
+                            "Frecuencia": freq,
+                            "Downtime (min)": round(downtime, 1),
+                            "Beta (β)": round(beta, 2) if not np.isnan(beta) else None,
+                            "Eta (η)": round(eta, 1) if not np.isnan(eta) else None,
+                            "Diagnóstico": diag
+                        })
+                    
+                    df_summary = pd.DataFrame(summary_rows)
+                    # Sort by Downtime desc
+                    df_summary = df_summary.sort_values("Downtime (min)", ascending=False)
+                    
+                    st.dataframe(df_summary, use_container_width=True, hide_index=True)
+
             # --- PARETO ---
             with tab_pareto:
                 st.markdown("#### Principio 80/20: Identificación de Equipos Críticos")
                 
-                # Date Filter for Pareto
-                c_p1, c_p2 = st.columns(2)
-                p_start = c_p1.date_input("Inicio Pareto", value=df_rel["__date"].min(), key="p_start", format="DD/MM/YYYY")
-                p_end = c_p2.date_input("Fin Pareto", value=df_rel["__date"].max(), key="p_end", format="DD/MM/YYYY")
-                
-                df_p = df_rel[(df_rel["__date"].dt.date >= p_start) & (df_rel["__date"].dt.date <= p_end)].copy()
+                df_p = df_gen.copy()
                 
                 if df_p.empty:
                     st.info("No hay datos en el rango seleccionado.")
@@ -766,16 +831,17 @@ def main():
                 st.markdown("Calcula el parámetro Beta (β) para diagnosticar el tipo de falla: Infantil, Aleatoria o Desgaste.")
                 
                 # Filter Equipments with enough data (> 4 failures)
-                counts = df_rel[equipo_col].value_counts()
+                # Use df_gen (filtered by date) instead of df_rel
+                counts = df_gen[equipo_col].value_counts()
                 valid_equips = counts[counts >= 5].index.tolist()
                 
                 if not valid_equips:
-                    st.warning("No hay equipos con suficientes fallas (mínimo 5) para un análisis Weibull confiable.")
+                    st.warning("No hay equipos con suficientes fallas (mínimo 5) en el rango seleccionado para un análisis Weibull confiable.")
                 else:
                     w_eq = st.selectbox("Seleccionar Equipo para Análisis", sorted(valid_equips))
                     
                     # Get data for specific equipment
-                    df_w = df_rel[df_rel[equipo_col] == w_eq].copy()
+                    df_w = df_gen[df_gen[equipo_col] == w_eq].copy()
                     df_w = df_w.sort_values("__date")
                     
                     # Calculate TBF (Time Between Failures) in Days
